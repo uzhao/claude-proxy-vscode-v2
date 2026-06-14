@@ -61,6 +61,8 @@
 | minimax | anthropic | api.minimaxi.com/anthropic | minimax | ✅ |
 | codex | (Part 3) | — | openai | ❌(Part 3) |
 
+> Codex 前瞻约束(Part 3):Codex 通过 OAuth 登录而非 apiKey,且**可能存在多个登录(多账号)**。数据模型需允许一个 codex provider 下挂多个登录身份(类比多 key 轮换),Part 3 实现时据此设计;Part 1 仅占位,不落地。
+
 ### 3. 模型列表来源:models.dev
 
 - 所有 provider 的可用模型**统一来自 models.dev**(`https://models.dev/api.json`,顶层按 provider id 索引,每个 provider 下 `models` 为 `{模型id: {name, release_date, …}}`)。
