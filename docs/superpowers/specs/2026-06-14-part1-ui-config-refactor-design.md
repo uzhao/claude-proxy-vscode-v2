@@ -9,7 +9,7 @@
 
 - **Part 1(本文)— UI / 配置重构**:纯配置与交互层,不改动格式转换逻辑。统一 mapping、用独立 JSON 文件组织 provider 配置、去掉启动端口提示、移除外部 spawn litellm/cliproxyapi 的代码,为 Part 2 让路。
 - **Part 2 — proxy 内置格式转换**:`pass` 取消代理;原生 Anthropic provider 换 model+key 转发;OpenAI/Gemini 格式在 proxy 内完成转换(移植自 CLIProxyAPI 的 `internal/translator`)。
-- **Part 3 — 鉴权 / 登录**:Codex OAuth 登录,可能含其他 OAuth 类 provider。
+- **Part 3 — 鉴权 / 登录**:仅 Codex OAuth 登录,其他 OAuth 暂不需要。
 
 本文只覆盖 Part 1。
 
@@ -82,7 +82,7 @@
 
 ### 6. 代理开关(沿用现有项目级注入)
 
-- `mapping === "pass"` → 清除每个项目 `.claude/settings.json` 中的 `ANTHROPIC_BASE_URL`,保证干净的官方请求。
+- `mapping === "pass"` → 清除当前项目 `.claude/settings.json` 中的 `ANTHROPIC_BASE_URL`,保证干净的官方请求。
 - 否则注入 `http://127.0.0.1:<随机端口>`。
 - 全局 `~/.claude/settings.json` 始终清空代理设置的逻辑保留。
 
@@ -107,6 +107,6 @@
 1. 删除所有 `claudeProxy.providers.*` 与 `claudeProxy.mappings.*` 设置,改由 `providers.json` 驱动;首启自动生成模板。
 2. 状态栏分级菜单可在 `最近使用` / `pass` / `全部 ▸ provider ▸ model` 间切换,选中后 `mapping` 与状态栏文本即时更新。
 3. 配置 anthropic 格式 provider 后,Claude 请求被正确换 baseUrl/model/key 转发;某 key 触发 401/429/5xx 时自动切下一个 key。
-4. `mapping = pass` 时项目 `.claude/settings.json` 的 `ANTHROPIC_BASE_URL` 被清除;非 pass 时注入当前随机端口。
+4. `mapping = pass` 时当前项目 `.claude/settings.json` 的 `ANTHROPIC_BASE_URL` 被清除;非 pass 时注入当前随机端口。
 5. 启动无端口弹窗;代码中不再存在 litellm/cliproxyapi 进程管理逻辑。
 6. `extension.ts` 拆分为上述模块,编译通过(`npm run compile`)。
