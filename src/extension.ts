@@ -13,8 +13,10 @@ let currentPort = 4001;
 let statusBar: StatusBar;
 const MAPPING_KEY = 'claudeProxy.mapping';
 
-function randomPort(): number {
-  return Math.floor(Math.random() * (65535 - 1024 + 1)) + 1024;
+/** 读取配置的代理端口(默认 4001,固定不漂移,保证 Claude Code 端口稳定) */
+function configuredPort(): number {
+  const p = vscode.workspace.getConfiguration('claudeProxy').get<number>('port', 4001);
+  return typeof p === 'number' && p > 0 && p < 65536 ? p : 4001;
 }
 
 function workspaceSettingsPath(): string {
@@ -88,28 +90,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
-  // 启动代理 server(随机端口,冲突漂移)
+  // 启动代理 server(固定端口,被占报错不漂移,保证 Claude Code 连接的端口稳定)
   server = createProxyServer({ getConfig, isJsonLogging, getCodexAuth: () => codexAuth.getValid() });
-  let retries = 0;
-  const tryListen = () => {
-    currentPort = randomPort();
-    server!.listen(currentPort, '127.0.0.1');
-  };
+  currentPort = configuredPort();
   server.on('listening', () => {
     console.log(`proxy listening on http://127.0.0.1:${currentPort}`);
-    syncProxy(getConfig()); // 用真实端口回填
+    syncProxy(getConfig()); // 用固定端口回填
   });
   server.on('error', (err: any) => {
-    if (err.code === 'EADDRINUSE' && retries < 10) {
-      retries++;
-      console.log(`port ${currentPort} in use, retrying`);
-      tryListen();
-      return;
+    if (err.code === 'EADDRINUSE') {
+      vscode.window.showErrorMessage(`Claude Proxy: 端口 ${currentPort} 被占用,请在设置中修改 claudeProxy.port 后重载窗口。`);
+    } else {
+      console.error('server error:', err);
     }
-    console.error('server error:', err);
     server = null;
   });
-  tryListen();
+  server.listen(currentPort, '127.0.0.1');
 
   context.subscriptions.push({
     dispose: () => {
