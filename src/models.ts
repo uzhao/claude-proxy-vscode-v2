@@ -1,7 +1,3 @@
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
-
 export interface ModelInfo {
   id: string;
   name: string;
@@ -9,12 +5,6 @@ export interface ModelInfo {
 }
 
 const CATALOG_URL = 'https://models.dev/api.json';
-const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
-
-/** 缓存文件路径 */
-export function cachePath(): string {
-  return path.join(os.homedir(), '.claude', 'proxy', 'models-cache.json');
-}
 
 /** 纯解析:从整份 catalog 取某 models.dev provider 的模型,按发布日期倒序 */
 export function parseProviderModels(catalog: any, modelsDevId: string): ModelInfo[] {
@@ -59,27 +49,16 @@ export function filterFeatured(models: ModelInfo[]): ModelInfo[] {
   return models.filter(m => isFeatured(m.id));
 }
 
-/** 读缓存;过期或不存在返回 null。now 可注入用于测试 TTL。 */
-export function readCache(p: string = cachePath(), now: number = Date.now()): any | null {
-  try {
-    const stat = fs.statSync(p);
-    if (now - stat.mtimeMs > CACHE_TTL_MS) {
-      return null;
-    }
-    return JSON.parse(fs.readFileSync(p, 'utf8'));
-  } catch {
-    return null;
-  }
+/** catalog 缓存接口(由宿主提供 globalState 实现) */
+export interface CatalogCache {
+  /** 返回有效缓存,或 null(过期/无) */
+  read(): any | null;
+  write(catalog: any): void;
 }
 
-export function writeCache(catalog: any, p: string = cachePath()): void {
-  fs.mkdirSync(path.dirname(p), { recursive: true });
-  fs.writeFileSync(p, JSON.stringify(catalog), 'utf8');
-}
-
-/** 取 catalog:优先有效缓存,否则拉取并写缓存。fetcher 可注入用于测试。 */
-export async function getCatalog(fetcher: typeof fetch = fetch): Promise<any> {
-  const cached = readCache();
+/** 取 catalog:优先有效缓存,否则拉取并写缓存。cache/fetcher 可注入用于测试。 */
+export async function getCatalog(cache: CatalogCache, fetcher: typeof fetch = fetch): Promise<any> {
+  const cached = cache.read();
   if (cached) {
     return cached;
   }
@@ -88,6 +67,6 @@ export async function getCatalog(fetcher: typeof fetch = fetch): Promise<any> {
     throw new Error(`models.dev fetch failed: ${res.status}`);
   }
   const catalog = await res.json();
-  writeCache(catalog);
+  cache.write(catalog);
   return catalog;
 }
