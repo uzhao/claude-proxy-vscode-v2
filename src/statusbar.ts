@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { ProxyConfig, configuredProviders, addKey, removeKey, setMapping } from './config';
 import { PRESETS, CODEX_PLACEHOLDER_ID, getPreset } from './presets';
 import { getCatalog, parseProviderModels, filterFeatured, ModelInfo } from './models';
+import { CodexAuth } from './codex/auth';
 
 const MRU_KEY = 'claudeProxy.recentMappings';
 const MRU_MAX = 5;
@@ -11,6 +12,7 @@ export interface StatusBarDeps {
   getConfig: () => ProxyConfig;
   /** 写配置 + 同步 Claude 代理开关 + 刷新文本 */
   applyConfig: (cfg: ProxyConfig) => void;
+  codexAuth: CodexAuth;
 }
 
 export class StatusBar {
@@ -46,10 +48,14 @@ export class StatusBar {
     }
 
     const provs = configuredProviders(cfg);
-    if (provs.length > 0) {
+    const codexIn = await this.deps.codexAuth.isLoggedIn();
+    if (provs.length > 0 || codexIn) {
       items.push({ label: 'Provider', kind: vscode.QuickPickItemKind.Separator });
       for (const p of provs) {
         items.push({ label: `$(server) ${p.name}`, description: `${p.apiKeys.length} key`, action: 'provider', value: p.name });
+      }
+      if (codexIn && !provs.some(p => p.name === 'codex')) {
+        items.push({ label: `$(server) codex`, description: '已登录', action: 'provider', value: 'codex' });
       }
     }
 
@@ -104,22 +110,30 @@ export class StatusBar {
     }
   }
 
-  // ---- Provider 设置:选 provider → 管理 key ----
+  // ---- Provider 设置:选 provider → 管理 key / codex 登录登出 ----
   private async providerSettings(): Promise<void> {
     type Item = vscode.QuickPickItem & { id?: string; codex?: boolean };
     const cfg = this.deps.getConfig();
-    const items: Item[] = PRESETS.map(p => {
+    const items: Item[] = PRESETS.filter(p => p.id !== 'codex').map(p => {
       const n = cfg.providers.find(x => x.name === p.id)?.apiKeys.length ?? 0;
       return { label: p.id, description: n > 0 ? `${n} key` : '未配置', id: p.id };
     });
-    items.push({ label: `${CODEX_PLACEHOLDER_ID}`, description: '需登录(后续支持)', codex: true });
+    const codexIn = await this.deps.codexAuth.isLoggedIn();
+    items.push({ label: CODEX_PLACEHOLDER_ID, description: codexIn ? '已登录(点击登出)' : '未登录(点击登录 ChatGPT)', codex: true });
 
-    const picked = await vscode.window.showQuickPick(items, { placeHolder: '选择 provider 管理 key' });
+    const picked = await vscode.window.showQuickPick(items, { placeHolder: '选择 provider 管理' });
     if (!picked) {
       return;
     }
     if (picked.codex) {
-      vscode.window.showInformationMessage('Codex 登录将在后续版本支持。');
+      if (codexIn) {
+        const pick = await vscode.window.showQuickPick(['登出 Codex'], { placeHolder: 'codex 已登录' });
+        if (pick === '登出 Codex') {
+          await vscode.commands.executeCommand('claudeProxy.codexLogout');
+        }
+      } else {
+        await vscode.commands.executeCommand('claudeProxy.codexLogin');
+      }
       return;
     }
     if (picked.id) {

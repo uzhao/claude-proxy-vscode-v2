@@ -64,9 +64,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
   };
 
-  statusBar = new StatusBar({ context, getConfig, applyConfig });
-
   const codexAuth = new CodexAuth(context.secrets);
+  statusBar = new StatusBar({ context, getConfig, applyConfig, codexAuth });
 
   // 注:启动时不在此同步代理 —— 端口尚未确定,统一由下方 server 'listening' 用真实端口回填
 
