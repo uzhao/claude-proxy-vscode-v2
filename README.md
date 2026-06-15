@@ -28,7 +28,7 @@
 
 - 本地 HTTP 代理(随机端口),通过项目 `.claude/settings.json` 的 `ANTHROPIC_BASE_URL` 接入 Claude Code。
 - `mapping = pass` 时透传到 `api.anthropic.com`;否则按目标 provider 的格式转换请求、转发,并把上游的流式响应回译为 Anthropic SSE 返回给 Claude Code。
-- API key 存于本机;codex 通过 OAuth 登录,凭证存入系统密钥链。
+- provider API key 与 codex OAuth 凭证均存入**系统密钥链**(VSCode SecretStorage),不落明文磁盘;模型列表缓存于 VSCode globalState。
 
 ## 🛠️ 开发
 
