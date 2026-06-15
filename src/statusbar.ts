@@ -110,9 +110,9 @@ export class StatusBar {
     }
   }
 
-  // ---- Provider 设置:选 provider → 管理 key / codex 登录登出 ----
+  // ---- Provider 设置:选 provider → 管理 key / codex 登录登出 / 改端口 ----
   private async providerSettings(): Promise<void> {
-    type Item = vscode.QuickPickItem & { id?: string; codex?: boolean };
+    type Item = vscode.QuickPickItem & { id?: string; codex?: boolean; port?: boolean };
     const cfg = this.deps.getConfig();
     const items: Item[] = PRESETS.filter(p => p.id !== 'codex').map(p => {
       const n = cfg.providers.find(x => x.name === p.id)?.apiKeys.length ?? 0;
@@ -120,9 +120,16 @@ export class StatusBar {
     });
     const codexIn = await this.deps.codexAuth.isLoggedIn();
     items.push({ label: CODEX_PLACEHOLDER_ID, description: codexIn ? '已登录(点击登出)' : '未登录(点击登录 ChatGPT)', codex: true });
+    items.push({ label: '', kind: vscode.QuickPickItemKind.Separator });
+    const curPort = vscode.workspace.getConfiguration('claudeProxy').get<number>('port', 4001);
+    items.push({ label: '$(plug) 代理端口', description: `当前 ${curPort}`, port: true });
 
     const picked = await vscode.window.showQuickPick(items, { placeHolder: '选择 provider 管理' });
     if (!picked) {
+      return;
+    }
+    if (picked.port) {
+      await this.changePort();
       return;
     }
     if (picked.codex) {
@@ -138,6 +145,27 @@ export class StatusBar {
     }
     if (picked.id) {
       await this.manageKeys(picked.id);
+    }
+  }
+
+  // ---- 改代理端口(写全局配置,需重载窗口生效) ----
+  private async changePort(): Promise<void> {
+    const cur = vscode.workspace.getConfiguration('claudeProxy').get<number>('port', 4001);
+    const input = await vscode.window.showInputBox({
+      prompt: '代理监听端口(1-65535),改后需重载窗口生效',
+      value: String(cur),
+      validateInput: (v) => {
+        const n = Number(v);
+        return Number.isInteger(n) && n > 0 && n < 65536 ? null : '请输入 1-65535 的整数';
+      },
+    });
+    if (!input) {
+      return;
+    }
+    await vscode.workspace.getConfiguration('claudeProxy').update('port', Number(input), vscode.ConfigurationTarget.Global);
+    const choice = await vscode.window.showInformationMessage(`代理端口已设为 ${input},需重载窗口生效。`, '重载窗口');
+    if (choice === '重载窗口') {
+      vscode.commands.executeCommand('workbench.action.reloadWindow');
     }
   }
 
