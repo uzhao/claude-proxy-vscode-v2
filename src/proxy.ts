@@ -1,7 +1,4 @@
 import * as http from 'http';
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
 import { ProxyConfig, getProvider } from './config';
 import { getPreset, Preset } from './presets';
 import { getTranslator } from './translate/registry';
@@ -55,32 +52,9 @@ function anthropicError(type: string, message: string): string {
   return JSON.stringify({ type: 'error', error: { type, message } });
 }
 
-// ---- 日志 ----
-function logDir(): string {
-  return path.join(os.homedir(), '.claude', 'proxy', 'log');
-}
-
-function saveLog(enabled: boolean, request: any, response: any, error?: any): void {
-  if (!enabled) {
-    return;
-  }
-  try {
-    const dir = logDir();
-    fs.mkdirSync(dir, { recursive: true });
-    const ts = new Date().toISOString();
-    const id = Math.random().toString(36).slice(2, 15);
-    const file = path.join(dir, `${ts.replace(/:/g, '-')}-${id}.json`);
-    fs.writeFileSync(file, JSON.stringify({ id, timestamp: ts, request, response, error: error ?? null }, null, 2), 'utf8');
-  } catch (e) {
-    console.warn('saveLog failed', e);
-  }
-}
-
 export interface ProxyServerDeps {
   /** 读取当前配置(每次请求实时读,保证热更新) */
   getConfig: () => ProxyConfig;
-  /** 是否写 JSON 日志 */
-  isJsonLogging: () => boolean;
   /** 获取有效的 codex OAuth 凭证;未登录返回 null */
   getCodexAuth?: () => Promise<{ accessToken: string; accountId: string } | null>;
 }
@@ -250,9 +224,6 @@ export function createProxyServer(deps: ProxyServerDeps): http.Server {
               console.error(`[proxy] upstream error ${upstream.status}: ${errText.slice(0, 500)}`);
               res.writeHead(upstream.status, { 'content-type': 'application/json' });
               res.end(anthropicError('upstream_error', errText.slice(0, 2000)));
-              saveLog(deps.isJsonLogging(),
-                { url: req.url, model: target?.model, mapping: cfg.mapping },
-                { status: upstream.status, error: errText.slice(0, 2000) });
               return;
             }
 
@@ -279,9 +250,6 @@ export function createProxyServer(deps: ProxyServerDeps): http.Server {
                 }
               }
               res.end();
-              saveLog(deps.isJsonLogging(),
-                { url: req.url, model: target?.model, mapping: cfg.mapping },
-                { status: upstream.status, translated: true });
               return;
             }
 
@@ -315,10 +283,6 @@ export function createProxyServer(deps: ProxyServerDeps): http.Server {
               }
             }
             res.end();
-
-            saveLog(deps.isJsonLogging(),
-              { url: req.url, model: requestBody?.model, mapping: cfg.mapping },
-              { status: upstream.status, bytes: Buffer.concat(collected).length });
             return;
           } catch (err) {
             lastErr = err;
@@ -333,7 +297,6 @@ export function createProxyServer(deps: ProxyServerDeps): http.Server {
         console.error('[proxy] all attempts failed:', lastErr);
         res.writeHead(500, { 'content-type': 'application/json' });
         res.end(anthropicError('api_error', String(lastErr?.message ?? lastErr)));
-        saveLog(deps.isJsonLogging(), { url: req.url, mapping: cfg.mapping }, null, String(lastErr));
       } catch (err) {
         console.error('proxy handler error:', err);
         if (!res.headersSent) {
