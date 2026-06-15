@@ -10,7 +10,7 @@ test('在 Responses 基础上叠加 codex 专属字段', () => {
   }, 'gpt-5-codex');
   assert.equal(out.model, 'gpt-5-codex');
   assert.equal(out.stream, true);
-  assert.equal(out.max_output_tokens, 64);
+  assert.equal(out.max_output_tokens, undefined); // codex 后端不接受,已删除
   assert.deepEqual(out.input[0], { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hi' }] });
   assert.equal(out.instructions, '');
   assert.equal(out.store, false);
