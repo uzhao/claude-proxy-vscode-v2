@@ -9,9 +9,13 @@ tsconfig.json
 # Node 开发依赖
 node_modules/@types/**
 
-# 文档
+# 文档(根 md 与设计文档目录都不打包,仅保留 README)
 *.md
 !README.md
+docs/**
+
+# 第三方参考项目(仅本地参考,不打包)
+CLIProxyAPI/**
 
 # Git
 .git/**
