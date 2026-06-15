@@ -24,3 +24,7 @@ node_modules/@types/**
 
 # 其他
 .DS_Store
+
+# 测试编译产物
+out/**/*.test.js
+out/**/*.test.js.map
