@@ -31,8 +31,31 @@ export function parseProviderModels(catalog: any, modelsDevId: string): ModelInf
   return list;
 }
 
-export function topN<T>(arr: T[], n: number): T[] {
-  return arr.slice(0, n);
+/** 默认展示的 model 白名单(glob:* 匹配任意串,. 匹配任意单字符,大小写不敏感) */
+const FEATURED_PATTERNS = [
+  'claude*4*', 'gpt*5*', 'gemini*3*', 'kimi-k2.*',
+  'glm-5*', 'deepseek-v4*', 'minimax-m3*', 'minimax-m2.*',
+];
+
+function globToRegExp(pattern: string): RegExp {
+  // 按 * 分段,段内转义正则特殊字符(故意不转义 . ,使其匹配任意单字符),段间用 .* 连接
+  const body = pattern
+    .split('*')
+    .map(seg => seg.replace(/[+^${}()|[\]\\]/g, '\\$&'))
+    .join('.*');
+  return new RegExp(`^${body}$`, 'i');
+}
+
+const FEATURED_REGEXPS = FEATURED_PATTERNS.map(globToRegExp);
+
+/** model id 是否命中默认展示白名单 */
+export function isFeatured(id: string): boolean {
+  return FEATURED_REGEXPS.some(re => re.test(id));
+}
+
+/** 仅保留命中白名单的 model */
+export function filterFeatured(models: ModelInfo[]): ModelInfo[] {
+  return models.filter(m => isFeatured(m.id));
 }
 
 /** 读缓存;过期或不存在返回 null。now 可注入用于测试 TTL。 */

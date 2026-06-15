@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseProviderModels, topN } from './models';
+import { parseProviderModels, isFeatured, filterFeatured } from './models';
 
 const CATALOG = {
   zhipuai: {
@@ -28,14 +28,42 @@ test('未知 provider 或空模型返回空数组', () => {
   assert.deepEqual(parseProviderModels(CATALOG, 'empty'), []);
 });
 
-test('topN 截取前 N 个', () => {
-  const list = parseProviderModels(CATALOG, 'zhipuai');
-  assert.deepEqual(topN(list, 2).map(m => m.id), ['glm-5', 'glm-4.6']);
-});
-
 test('name 缺省回退到 id', () => {
   const c = { x: { models: { 'm1': { id: 'm1', release_date: '2026-01-01' } } } };
   assert.equal(parseProviderModels(c, 'x')[0].name, 'm1');
+});
+
+test('isFeatured:* 匹配任意串', () => {
+  assert.equal(isFeatured('gpt-5'), true);
+  assert.equal(isFeatured('gpt-5-mini'), true);
+  assert.equal(isFeatured('glm-5'), true);
+  assert.equal(isFeatured('glm-5-air'), true);
+});
+
+test('isFeatured:. 匹配任意单字符(覆盖连字符 id)', () => {
+  assert.equal(isFeatured('kimi-k2-0905'), true);
+  assert.equal(isFeatured('minimax-m2-pro'), true);
+});
+
+test('isFeatured:大小写不敏感', () => {
+  assert.equal(isFeatured('GLM-5'), true);
+  assert.equal(isFeatured('Claude-Opus-4-1'), true);
+});
+
+test('isFeatured:未命中返回 false', () => {
+  assert.equal(isFeatured('glm-4.6'), false);
+  assert.equal(isFeatured('gpt-4o'), false);
+  assert.equal(isFeatured('deepseek-v3'), false);
+});
+
+test('filterFeatured 跨 provider 只留命中项', () => {
+  const models = [
+    { id: 'glm-5', name: 'GLM 5', releaseDate: '' },
+    { id: 'glm-4.6', name: 'GLM 4.6', releaseDate: '' },
+    { id: 'gpt-5', name: 'GPT 5', releaseDate: '' },
+    { id: 'gpt-4o', name: 'GPT 4o', releaseDate: '' },
+  ];
+  assert.deepEqual(filterFeatured(models).map(m => m.id), ['glm-5', 'gpt-5']);
 });
 
 import { readCache, writeCache, getCatalog } from './models';
