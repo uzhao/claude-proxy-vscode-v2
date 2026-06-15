@@ -1,11 +1,10 @@
 import * as vscode from 'vscode';
 import { ProxyConfig, configuredProviders, addKey, removeKey, setMapping } from './config';
 import { PRESETS, CODEX_PLACEHOLDER_ID, getPreset } from './presets';
-import { getCatalog, parseProviderModels, topN, ModelInfo } from './models';
+import { getCatalog, parseProviderModels, filterFeatured, ModelInfo } from './models';
 
 const MRU_KEY = 'claudeProxy.recentMappings';
 const MRU_MAX = 5;
-const TOP_N = 8;
 
 export interface StatusBarDeps {
   context: vscode.ExtensionContext;
@@ -86,7 +85,7 @@ export class StatusBar {
       vscode.window.showErrorMessage(`获取模型失败: ${String(e)}`);
       return;
     }
-    const shown = showAll ? models : topN(models, TOP_N);
+    const shown = showAll ? models : filterFeatured(models);
 
     type Item = vscode.QuickPickItem & { model?: string; more?: boolean };
     const items: Item[] = shown.map(m => ({ label: m.id, description: m.name === m.id ? '' : m.name, model: m.id }));
