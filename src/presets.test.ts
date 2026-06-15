@@ -16,10 +16,11 @@ test('国产四家为 anthropic 格式且 forwardable', () => {
   }
 });
 
-test('openai/gemini/openrouter/nvidia 非 anthropic 且 Part 1 不可转发', () => {
-  for (const id of ['openai', 'gemini', 'openrouter', 'nvidia']) {
-    assert.equal(getPreset(id)!.forwardable, false);
+test('openai 系 Part 2a 起可转发,gemini 仍不可转发', () => {
+  for (const id of ['openai', 'openrouter', 'nvidia']) {
+    assert.equal(getPreset(id)!.forwardable, true);
   }
+  assert.equal(getPreset('gemini')!.forwardable, false);
 });
 
 test('preset 映射到正确的 models.dev id', () => {

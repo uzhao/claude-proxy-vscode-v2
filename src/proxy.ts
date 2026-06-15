@@ -4,6 +4,8 @@ import * as path from 'path';
 import * as os from 'os';
 import { ProxyConfig, getProvider } from './config';
 import { getPreset, Preset } from './presets';
+import { getTranslator } from './translate/registry';
+import { SSEParser } from './translate/sse';
 
 export interface Target {
   preset: Preset;
@@ -44,6 +46,11 @@ export function resolveTarget(cfg: ProxyConfig): Target | null {
 /** 该响应状态是否应触发切换下一个 key */
 export function shouldRotate(status: number): boolean {
   return status === 401 || status === 429 || status >= 500;
+}
+
+/** 构造 Anthropic 标准错误响应体 */
+function anthropicError(type: string, message: string): string {
+  return JSON.stringify({ type: 'error', error: { type, message } });
 }
 
 // ---- 日志 ----
@@ -103,10 +110,15 @@ export function createProxyServer(deps: ProxyServerDeps): http.Server {
         const cfg = deps.getConfig();
         const target = resolveTarget(cfg);
 
-        // 非 anthropic 目标:Part 1 不支持转换
+        // 解析转换器:有 target 且该格式支持转换则走转换转发;anthropic 格式无 translator,走原样转发
+        const translator = target ? getTranslator(target.preset.format) : null;
+
+        // 有 target 但格式尚不支持(如 gemini)→ Anthropic 标准错误
         if (target && !target.forwardable) {
+          console.warn(`[proxy] format "${target.preset.format}" not supported yet (provider=${target.preset.id})`);
           res.writeHead(502, { 'content-type': 'application/json' });
-          res.end(JSON.stringify({ error: `Provider "${target.preset.id}" (${target.preset.format}) 暂不支持,等待 Part 2 的格式转换。` }));
+          res.end(anthropicError('invalid_request_error',
+            `Provider "${target.preset.id}" (${target.preset.format}) 暂不支持,等待后续版本的格式转换。`));
           return;
         }
 
@@ -116,13 +128,22 @@ export function createProxyServer(deps: ProxyServerDeps): http.Server {
         let apiKeys: string[] = [];
 
         if (target) {
-          targetUrl = `${target.preset.baseUrl}${req.url}`;
           apiKeys = target.apiKeys;
-          if (requestBody && target.model) {
-            requestBody.model = target.model;
-            targetBody = Buffer.from(JSON.stringify(requestBody), 'utf8');
+          if (translator) {
+            // 格式转换路径(openai 系):换端点 + 请求体转换
+            targetUrl = `${target.preset.baseUrl}${translator.endpointPath}`;
+            const upstreamBody = translator.buildRequest(requestBody ?? {}, target.model);
+            targetBody = Buffer.from(JSON.stringify(upstreamBody), 'utf8');
+          } else {
+            // 原样转发路径(anthropic 系):仅换 baseUrl/model
+            targetUrl = `${target.preset.baseUrl}${req.url}`;
+            if (requestBody && target.model) {
+              requestBody.model = target.model;
+              targetBody = Buffer.from(JSON.stringify(requestBody), 'utf8');
+            }
           }
         }
+        console.log(`[proxy] mapping=${cfg.mapping} → ${target ? target.preset.format : 'passthrough'} ${targetUrl} (keys=${apiKeys.length}, translate=${!!translator})`);
 
         // 转发头(剔除代理相关 + 原认证头,后面按 key 注入)
         const baseHeaders: Record<string, any> = {};
@@ -136,6 +157,9 @@ export function createProxyServer(deps: ProxyServerDeps): http.Server {
           }
           baseHeaders[k] = v;
         }
+        if (translator) {
+          baseHeaders['content-type'] = 'application/json';
+        }
 
         const tryKeys = apiKeys.length > 0 ? apiKeys : [null];
         let lastErr: any = null;
@@ -144,19 +168,65 @@ export function createProxyServer(deps: ProxyServerDeps): http.Server {
           const key = tryKeys[i];
           const headers: Record<string, any> = { ...baseHeaders };
           if (key) {
-            headers['x-api-key'] = key; // anthropic 格式
+            if (translator) {
+              Object.assign(headers, translator.authHeader(key));
+            } else {
+              headers['x-api-key'] = key; // anthropic 格式
+            }
           }
           try {
             const upstream = await fetch(targetUrl, { method: 'POST', headers: headers as any, body: targetBody });
+            console.log(`[proxy] upstream status ${upstream.status} (key #${i})`);
 
             // 命中需轮换的状态且还有下一个 key → 换 key 重试
             if (apiKeys.length > 0 && shouldRotate(upstream.status) && i < tryKeys.length - 1) {
-              console.warn(`key #${i} 失败(${upstream.status}),切换下一个`);
+              console.warn(`[proxy] key #${i} failed (${upstream.status}), rotating`);
               await upstream.body?.cancel();
               continue;
             }
 
-            // 转发响应头
+            // 上游错误:统一 Anthropic 错误格式返回
+            if (upstream.status >= 400) {
+              const errText = await upstream.text();
+              console.error(`[proxy] upstream error ${upstream.status}: ${errText.slice(0, 500)}`);
+              res.writeHead(upstream.status, { 'content-type': 'application/json' });
+              res.end(anthropicError('upstream_error', errText.slice(0, 2000)));
+              saveLog(deps.isJsonLogging(),
+                { url: req.url, model: target?.model, mapping: cfg.mapping },
+                { status: upstream.status, error: errText.slice(0, 2000) });
+              return;
+            }
+
+            if (translator) {
+              // 格式转换:边收上游 SSE 边转 Anthropic SSE
+              res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
+              const parser = new SSEParser();
+              const stream = translator.createStreamTranslator();
+              const reader = upstream.body?.getReader();
+              const decoder = new TextDecoder();
+              if (reader) {
+                while (true) {
+                  const { done, value } = await reader.read();
+                  if (done) {
+                    break;
+                  }
+                  for (const payload of parser.push(decoder.decode(value, { stream: true }))) {
+                    for (const event of stream.push(payload)) {
+                      if (!res.write(event)) {
+                        await new Promise<void>(resolve => res.once('drain', resolve));
+                      }
+                    }
+                  }
+                }
+              }
+              res.end();
+              saveLog(deps.isJsonLogging(),
+                { url: req.url, model: target?.model, mapping: cfg.mapping },
+                { status: upstream.status, translated: true });
+              return;
+            }
+
+            // 原样转发响应头 + body(anthropic 路径)
             const respHeaders: Record<string, string> = {};
             for (const [k, v] of upstream.headers.entries()) {
               const lk = k.toLowerCase();
@@ -193,16 +263,16 @@ export function createProxyServer(deps: ProxyServerDeps): http.Server {
           } catch (err) {
             lastErr = err;
             if (apiKeys.length > 0 && i < tryKeys.length - 1) {
-              console.warn(`key #${i} 网络错误,切换下一个`, err);
+              console.warn(`[proxy] key #${i} network error, rotating`, err);
               continue;
             }
           }
         }
 
         // 全部失败
-        console.error('代理错误:', lastErr);
+        console.error('[proxy] all attempts failed:', lastErr);
         res.writeHead(500, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ error: String(lastErr?.message ?? lastErr) }));
+        res.end(anthropicError('api_error', String(lastErr?.message ?? lastErr)));
         saveLog(deps.isJsonLogging(), { url: req.url, mapping: cfg.mapping }, null, String(lastErr));
       } catch (err) {
         console.error('proxy handler error:', err);
