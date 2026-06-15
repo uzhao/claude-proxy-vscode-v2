@@ -111,7 +111,7 @@ export function createProxyServer(deps: ProxyServerDeps): http.Server {
         const target = resolveTarget(cfg);
 
         // 解析转换器:有 target 且该格式支持转换则走转换转发;anthropic 格式无 translator,走原样转发
-        const translator = target ? getTranslator(target.preset.format) : null;
+        const translator = target ? getTranslator(target.preset) : null;
 
         // 有 target 但格式尚不支持(如 gemini)→ Anthropic 标准错误
         if (target && !target.forwardable) {
