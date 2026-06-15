@@ -99,22 +99,33 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
-  // 启动代理 server(固定端口,被占报错不漂移,保证 Claude Code 连接的端口稳定)
+  // 启动代理 server:固定起始端口(claudeProxy.port,默认 4001),被占则递增找可用
+  // —— 单项目稳定用起始端口;同机多项目窗口并行时各自往后挑,互不冲突。实际端口回填到项目 settings.json。
   server = createProxyServer({ getConfig, getCodexAuth: () => codexAuth.getValid() });
-  currentPort = configuredPort();
+  const startPort = configuredPort();
+  currentPort = startPort;
+  let portRetries = 0;
+  const tryListen = () => server!.listen(currentPort, '127.0.0.1');
   server.on('listening', () => {
     console.log(`proxy listening on http://127.0.0.1:${currentPort}`);
-    syncProxy(getConfig()); // 用固定端口回填
+    syncProxy(getConfig()); // 用实际端口回填
   });
   server.on('error', (err: any) => {
+    if (err.code === 'EADDRINUSE' && portRetries < 20) {
+      portRetries++;
+      currentPort++;
+      console.log(`port in use, trying ${currentPort}`);
+      tryListen();
+      return;
+    }
     if (err.code === 'EADDRINUSE') {
-      vscode.window.showErrorMessage(`Claude Proxy: 端口 ${currentPort} 被占用,请在设置中修改 claudeProxy.port 后重载窗口。`);
+      vscode.window.showErrorMessage(`Claude Proxy: 端口 ${startPort}~${currentPort} 都被占用,请修改 claudeProxy.port 后重载窗口。`);
     } else {
       console.error('server error:', err);
     }
     server = null;
   });
-  server.listen(currentPort, '127.0.0.1');
+  tryListen();
 
   context.subscriptions.push({
     dispose: () => {

@@ -50,7 +50,7 @@
           "claudeProxy.port": {
             "type": "number",
             "default": 4001,
-            "description": "本地代理监听端口(固定使用;被占用时会报错,请改此值后重载窗口)",
+            "description": "本地代理起始端口(默认 4001);被占用时自动递增找可用端口,实际端口写入项目 .claude/settings.json",
             "scope": "machine"
           }
         }
