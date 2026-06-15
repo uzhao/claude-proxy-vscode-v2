@@ -1,7 +1,9 @@
 import * as vscode from 'vscode';
 import * as http from 'http';
 import * as path from 'path';
-import { ProxyConfig, ensureProviders, readProviders, writeProviders, configPath } from './config';
+import { ProxyConfig } from './config';
+import { ProviderKeyStore, ProviderKeys } from './providerKeys';
+import { getCatalog, CatalogCache } from './models';
 import { createProxyServer } from './proxy';
 import { StatusBar } from './statusbar';
 import { GLOBAL_SETTINGS_PATH, clearProxy, setProxy, getProxy } from './claudeSettings';
@@ -25,10 +27,6 @@ function workspaceSettingsPath(): string {
   return path.join(root, '.claude', 'settings.json');
 }
 
-function isJsonLogging(): boolean {
-  return vscode.workspace.getConfiguration('claudeProxy').get<boolean>('enableJsonLogging', false);
-}
-
 /** 按当前 mapping 同步项目级 Claude 代理开关;返回代理开关是否发生翻转 */
 function syncProxy(cfg: ProxyConfig): boolean {
   clearProxy(GLOBAL_SETTINGS_PATH); // 全局始终不带代理
@@ -46,18 +44,37 @@ function syncProxy(cfg: ProxyConfig): boolean {
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   console.log('Claude Proxy activating...');
 
-  ensureProviders();
+  const MODELS_CACHE_KEY = 'claudeProxy.modelsCache';
+  const MODELS_CACHE_TTL = 24 * 60 * 60 * 1000;
 
-  // 组合运行时视图:mapping(本项目 workspaceState)+ providers(全局 providers.json)
+  // provider key:从 SecretStorage 读入内存(首启迁移旧 providers.json)
+  const keyStore = new ProviderKeyStore(context.secrets);
+  let providerKeys: ProviderKeys = await keyStore.load();
+  providerKeys = await keyStore.migrateLegacy(providerKeys);
+
+  const codexAuth = new CodexAuth(context.secrets);
+
+  // models 缓存:globalState 实现(含 TTL)
+  const catalogCache: CatalogCache = {
+    read: () => {
+      const c = context.globalState.get<{ catalog: any; fetchedAt: number }>(MODELS_CACHE_KEY);
+      return c && Date.now() - c.fetchedAt < MODELS_CACHE_TTL ? c.catalog : null;
+    },
+    write: (catalog) => {
+      context.globalState.update(MODELS_CACHE_KEY, { catalog, fetchedAt: Date.now() });
+    },
+  };
+
+  // 运行时视图:mapping(workspaceState)+ providers(内存 key 缓存)
   const getConfig = (): ProxyConfig => ({
     mapping: context.workspaceState.get<string>(MAPPING_KEY, 'pass'),
-    providers: readProviders(),
+    providers: Object.entries(providerKeys).map(([name, apiKeys]) => ({ name, apiKeys })),
   });
 
-  // applyConfig:拆分落地(providers→全局文件,mapping→本项目)+ 同步代理 + 刷新;开关翻转才 reload
-  // 必须 await mapping 写入再 reload —— 否则窗口可能在持久化前重载,导致 per-project mapping 丢失
+  // applyConfig:providers 更新内存 + 写 SecretStorage;mapping 写 workspaceState;同步代理 + 刷新;翻转才 reload
   const applyConfig = async (cfg: ProxyConfig) => {
-    writeProviders(cfg.providers);
+    providerKeys = Object.fromEntries(cfg.providers.map(p => [p.name, p.apiKeys]));
+    await keyStore.save(providerKeys);
     await context.workspaceState.update(MAPPING_KEY, cfg.mapping);
     const flipped = syncProxy(cfg);
     statusBar.refresh();
@@ -66,21 +83,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
   };
 
-  const codexAuth = new CodexAuth(context.secrets);
-  statusBar = new StatusBar({ context, getConfig, applyConfig, codexAuth });
+  statusBar = new StatusBar({ context, getConfig, applyConfig, codexAuth, getCatalog: () => getCatalog(catalogCache) });
 
   // 注:启动时不在此同步代理 —— 端口尚未确定,统一由下方 server 'listening' 用真实端口回填
 
   // 命令:打开菜单(状态栏点击)
   context.subscriptions.push(
     vscode.commands.registerCommand('claudeProxy.openMenu', () => statusBar.openMenu()),
-  );
-  // 命令:编辑配置文件(高级入口)
-  context.subscriptions.push(
-    vscode.commands.registerCommand('claudeProxy.editConfig', async () => {
-      const doc = await vscode.workspace.openTextDocument(configPath());
-      vscode.window.showTextDocument(doc);
-    }),
   );
   context.subscriptions.push(
     vscode.commands.registerCommand('claudeProxy.codexLogin', () => loginCodex(codexAuth)),
@@ -91,7 +100,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
 
   // 启动代理 server(固定端口,被占报错不漂移,保证 Claude Code 连接的端口稳定)
-  server = createProxyServer({ getConfig, isJsonLogging, getCodexAuth: () => codexAuth.getValid() });
+  server = createProxyServer({ getConfig, getCodexAuth: () => codexAuth.getValid() });
   currentPort = configuredPort();
   server.on('listening', () => {
     console.log(`proxy listening on http://127.0.0.1:${currentPort}`);

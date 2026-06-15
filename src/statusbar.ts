@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { ProxyConfig, configuredProviders, addKey, removeKey, setMapping } from './config';
 import { PRESETS, CODEX_PLACEHOLDER_ID, getPreset } from './presets';
-import { getCatalog, parseProviderModels, filterFeatured, ModelInfo } from './models';
+import { parseProviderModels, filterFeatured, ModelInfo } from './models';
 import { CodexAuth } from './codex/auth';
 
 const MRU_KEY = 'claudeProxy.recentMappings';
@@ -13,6 +13,8 @@ export interface StatusBarDeps {
   /** 写配置 + 同步 Claude 代理开关 + 刷新文本 */
   applyConfig: (cfg: ProxyConfig) => void;
   codexAuth: CodexAuth;
+  /** 取 model catalog(含缓存),由外部注入 */
+  getCatalog: () => Promise<any>;
 }
 
 export class StatusBar {
@@ -85,7 +87,7 @@ export class StatusBar {
     }
     let models: ModelInfo[] = [];
     try {
-      const catalog = await getCatalog();
+      const catalog = await this.deps.getCatalog();
       models = parseProviderModels(catalog, preset.modelsDevId);
     } catch (e) {
       vscode.window.showErrorMessage(`获取模型失败: ${String(e)}`);
