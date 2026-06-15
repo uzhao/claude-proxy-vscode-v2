@@ -156,11 +156,11 @@ export class StatusBar {
   }
 
   private setMapping(mapping: string): void {
+    // 刷新由 applyConfig 在 mapping 写入完成后统一负责,此处不再重复 refresh
     this.deps.applyConfig(setMapping(this.deps.getConfig(), mapping));
     if (mapping !== 'pass') {
       this.pushRecent(mapping);
     }
-    this.refresh();
   }
 
   private pushRecent(mapping: string): void {
