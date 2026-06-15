@@ -1,16 +1,16 @@
 {
-  "name": "claude-proxy",
-  "displayName": "Claude Proxy",
+  "name": "claude-proxy-v2",
+  "displayName": "Claude Proxy v2",
   "description": "Simple proxy for Claude API with multiple AI provider support",
-  "version": "0.0.9",
+  "version": "0.0.1",
   "publisher": "uzhao",
-  "homepage": "https://github.com/uzhao/claude-proxy-vscode#readme",
+  "homepage": "https://github.com/uzhao/claude-proxy-vscode-v2#readme",
   "bugs": {
-    "url": "https://github.com/uzhao/claude-proxy-vscode/issues"
+    "url": "https://github.com/uzhao/claude-proxy-vscode-v2/issues"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/uzhao/claude-proxy-vscode.git"
+    "url": "https://github.com/uzhao/claude-proxy-vscode-v2.git"
   },
   "galleryBanner": {
     "color": "#1e1e1e",
