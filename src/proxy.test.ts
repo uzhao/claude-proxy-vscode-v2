@@ -28,9 +28,9 @@ test('未知 provider 或缺 model 返回 null', () => {
   assert.equal(resolveTarget({ mapping: 'glm', providers: [{ name: 'glm', apiKeys: ['k'] }] }), null);
 });
 
-test('openai 格式 Part 2a 起可转发;gemini 仍不可转发', () => {
+test('openai 格式可转发;未知 provider 返回 null', () => {
   assert.equal(resolveTarget({ mapping: 'openai:gpt-4o', providers: [{ name: 'openai', apiKeys: ['k'] }] })!.forwardable, true);
-  assert.equal(resolveTarget({ mapping: 'gemini:gemini-3-pro', providers: [{ name: 'gemini', apiKeys: ['k'] }] })!.forwardable, false);
+  assert.equal(resolveTarget({ mapping: 'gemini:x', providers: [{ name: 'gemini', apiKeys: ['k'] }] }), null);
 });
 
 test('model 名含冒号可正确还原', () => {

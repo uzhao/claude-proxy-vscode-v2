@@ -12,6 +12,6 @@ test('openai format 返回转换器,端点与认证正确', () => {
   assert.equal(typeof t.createStreamTranslator().push, 'function');
 });
 
-test('gemini/codex 尚未实现返回 null', () => {
-  assert.equal(getTranslator('gemini'), null);
+test('anthropic/codex 尚未实现返回 null', () => {
+  assert.equal(getTranslator('anthropic'), null);
 });
