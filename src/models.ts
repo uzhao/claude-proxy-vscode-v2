@@ -48,9 +48,10 @@ function globToRegExp(pattern: string): RegExp {
 
 const FEATURED_REGEXPS = FEATURED_PATTERNS.map(globToRegExp);
 
-/** model id 是否命中默认展示白名单 */
+/** model id 是否命中默认展示白名单(仅匹配 / 后的模型名,忽略 nvidia/openrouter 等的 vendor 前缀) */
 export function isFeatured(id: string): boolean {
-  return FEATURED_REGEXPS.some(re => re.test(id));
+  const name = id.slice(id.lastIndexOf('/') + 1);
+  return FEATURED_REGEXPS.some(re => re.test(name));
 }
 
 /** 仅保留命中白名单的 model */

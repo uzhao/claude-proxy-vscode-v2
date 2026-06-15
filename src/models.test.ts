@@ -56,6 +56,14 @@ test('isFeatured:未命中返回 false', () => {
   assert.equal(isFeatured('deepseek-v3'), false);
 });
 
+test('isFeatured:忽略 vendor 前缀,只匹配 / 后的模型名', () => {
+  assert.equal(isFeatured('z-ai/glm-5.1'), true);
+  assert.equal(isFeatured('moonshotai/kimi-k2.6'), true);
+  assert.equal(isFeatured('minimaxai/minimax-m2.7'), true);
+  assert.equal(isFeatured('deepseek-ai/deepseek-v4-pro'), true);
+  assert.equal(isFeatured('openai/gpt-oss-120b'), false);
+});
+
 test('filterFeatured 跨 provider 只留命中项', () => {
   const models = [
     { id: 'glm-5', name: 'GLM 5', releaseDate: '' },
