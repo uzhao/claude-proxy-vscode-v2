@@ -33,6 +33,13 @@ test('openai 格式可转发;未知 provider 返回 null', () => {
   assert.equal(resolveTarget({ mapping: 'gemini:x', providers: [{ name: 'gemini', apiKeys: ['k'] }] }), null);
 });
 
+test('codex 无 providers.json key 仍命中 target(用 OAuth)', () => {
+  const t = resolveTarget({ mapping: 'codex:gpt-5.5', providers: [] })!;
+  assert.equal(t.preset.id, 'codex');
+  assert.equal(t.model, 'gpt-5.5');
+  assert.deepEqual(t.apiKeys, []);
+});
+
 test('model 名含冒号可正确还原', () => {
   const t = resolveTarget({ mapping: 'openrouter:vendor:model-x', providers: [{ name: 'openrouter', apiKeys: ['k'] }] })!;
   assert.equal(t.model, 'vendor:model-x');

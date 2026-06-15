@@ -37,10 +37,12 @@ export function resolveTarget(cfg: ProxyConfig): Target | null {
     return null;
   }
   const entry = getProvider(cfg, name);
-  if (!entry || entry.apiKeys.length === 0) {
+  const apiKeys = entry?.apiKeys ?? [];
+  // codex 用 OAuth 登录,不需要 providers.json 中的 key;其余 provider 必须至少有一个 key
+  if (preset.id !== 'codex' && apiKeys.length === 0) {
     return null;
   }
-  return { preset, model, apiKeys: entry.apiKeys, forwardable: preset.forwardable };
+  return { preset, model, apiKeys, forwardable: preset.forwardable };
 }
 
 /** 该响应状态是否应触发切换下一个 key */
@@ -284,10 +286,11 @@ export function createProxyServer(deps: ProxyServerDeps): http.Server {
             }
 
             // 原样转发响应头 + body(anthropic 路径)
+            // 剔除 content-encoding:fetch 已自动解压 body,保留该头会让客户端再次解压明文而报 ZlibError
             const respHeaders: Record<string, string> = {};
             for (const [k, v] of upstream.headers.entries()) {
               const lk = k.toLowerCase();
-              if (['connection', 'keep-alive', 'transfer-encoding', 'content-length'].includes(lk)) {
+              if (['connection', 'keep-alive', 'transfer-encoding', 'content-length', 'content-encoding'].includes(lk)) {
                 continue;
               }
               respHeaders[k] = v;
