@@ -3,6 +3,7 @@ import { buildOpenAIRequest } from './openai/request';
 import { OpenAIToClaudeStream } from './openai/response';
 import { buildResponsesRequest } from './responses/request';
 import { ResponsesToClaudeStream } from './responses/response';
+import { buildCodexRequest } from './codex/request';
 
 /** 一个流式转换器:把 data 负载逐个转为 Anthropic SSE 文本 */
 export interface StreamTranslator {
@@ -31,8 +32,18 @@ const RESPONSES_TRANSLATOR: Translator = {
   authHeader: (key) => ({ Authorization: `Bearer ${key}` }),
 };
 
+const CODEX_TRANSLATOR: Translator = {
+  buildRequest: buildCodexRequest,
+  createStreamTranslator: () => new ResponsesToClaudeStream(),
+  endpointPath: '/responses',
+  authHeader: () => ({}), // codex 认证由 proxy 用 OAuth token 注入,这里留空
+};
+
 /** 按 preset 返回转换器;anthropic 格式返回 null(原样转发) */
 export function getTranslator(preset: Preset): Translator | null {
+  if (preset.id === 'codex') {
+    return CODEX_TRANSLATOR;
+  }
   if (preset.format !== 'openai') {
     return null;
   }
