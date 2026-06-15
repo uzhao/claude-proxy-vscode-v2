@@ -151,7 +151,8 @@ export function createProxyServer(deps: ProxyServerDeps): http.Server {
         const baseHeaders: Record<string, any> = {};
         for (const [k, v] of Object.entries(req.headers)) {
           const lk = k.toLowerCase();
-          if (['host', 'connection', 'content-length'].includes(lk)) {
+          // accept-encoding 一并剔除:强制上游返回明文,避免转换/转发链路出现压缩编码不一致(ZlibError)
+          if (['host', 'connection', 'content-length', 'accept-encoding'].includes(lk)) {
             continue;
           }
           if (target && (lk === 'x-api-key' || lk === 'authorization')) {
