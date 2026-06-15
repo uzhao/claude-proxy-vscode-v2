@@ -8,22 +8,23 @@ export interface ProviderEntry {
   apiKeys: string[];
 }
 
+/**
+ * 运行时内存聚合视图(非磁盘格式):mapping 来自 workspaceState、providers 来自 providers.json。
+ * providers.json 本身只持久化 providers。
+ */
 export interface ProxyConfig {
   /** "provider:model" 或 "pass" */
   mapping: string;
   providers: ProviderEntry[];
 }
 
-export const DEFAULT_CONFIG: ProxyConfig = { mapping: 'pass', providers: [] };
-
 export function configPath(): string {
   return path.join(os.homedir(), '.claude', 'proxy', 'providers.json');
 }
 
-/** 把任意 JSON 规范化为合法 ProxyConfig,丢弃非法字段 */
-export function normalize(raw: any): ProxyConfig {
-  const mapping = typeof raw?.mapping === 'string' ? raw.mapping : 'pass';
-  const providers: ProviderEntry[] = Array.isArray(raw?.providers)
+/** 把任意 JSON 的 providers 字段规范化为合法数组;非法项整体丢弃,非法 apiKey 元素逐个过滤 */
+export function normalizeProviders(raw: any): ProviderEntry[] {
+  return Array.isArray(raw?.providers)
     ? raw.providers
         .filter((e: any) => e && typeof e.name === 'string')
         .map((e: any) => ({
@@ -31,29 +32,30 @@ export function normalize(raw: any): ProxyConfig {
           apiKeys: Array.isArray(e.apiKeys) ? e.apiKeys.filter((k: any) => typeof k === 'string') : [],
         }))
     : [];
-  return { mapping, providers };
 }
 
-export function readConfig(p: string = configPath()): ProxyConfig {
+/** 读 providers.json 的 providers;文件不存在/非法返回 [] */
+export function readProviders(p: string = configPath()): ProviderEntry[] {
   try {
-    return normalize(JSON.parse(fs.readFileSync(p, 'utf8')));
+    return normalizeProviders(JSON.parse(fs.readFileSync(p, 'utf8')));
   } catch {
-    return { mapping: 'pass', providers: [] };
+    return [];
   }
 }
 
-export function writeConfig(cfg: ProxyConfig, p: string = configPath()): void {
+/** 写 providers 到 providers.json(仅 { providers }) */
+export function writeProviders(providers: ProviderEntry[], p: string = configPath()): void {
   fs.mkdirSync(path.dirname(p), { recursive: true });
-  fs.writeFileSync(p, JSON.stringify(cfg, null, 2), 'utf8');
+  fs.writeFileSync(p, JSON.stringify({ providers }, null, 2), 'utf8');
 }
 
-/** 不存在则写默认模板并返回;存在则读取 */
-export function ensureConfig(p: string = configPath()): ProxyConfig {
+/** 不存在则写空模板并返回 [];存在则读取 */
+export function ensureProviders(p: string = configPath()): ProviderEntry[] {
   if (!fs.existsSync(p)) {
-    writeConfig(DEFAULT_CONFIG, p);
-    return { mapping: 'pass', providers: [] };
+    writeProviders([], p);
+    return [];
   }
-  return readConfig(p);
+  return readProviders(p);
 }
 
 export function getProvider(cfg: ProxyConfig, name: string): ProviderEntry | undefined {

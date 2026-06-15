@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
-  ProxyConfig, normalize, readConfig, writeConfig, ensureConfig,
+  ProxyConfig, ProviderEntry, normalizeProviders, readProviders, writeProviders, ensureProviders,
   getProvider, configuredProviders, addKey, removeKey, setMapping,
 } from './config';
 
@@ -12,28 +12,28 @@ function tmp(): string {
   return path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'cp-')), 'providers.json');
 }
 
-test('normalize 容错非法输入', () => {
-  assert.deepEqual(normalize(null), { mapping: 'pass', providers: [] });
-  assert.deepEqual(normalize({ mapping: 5, providers: 'x' }), { mapping: 'pass', providers: [] });
+test('normalizeProviders 容错非法输入', () => {
+  assert.deepEqual(normalizeProviders(null), []);
+  assert.deepEqual(normalizeProviders({ providers: 'x' }), []);
   assert.deepEqual(
-    normalize({ mapping: 'glm:glm-5', providers: [{ name: 'glm', apiKeys: ['k1', 2] }, { bad: 1 }] }),
-    { mapping: 'glm:glm-5', providers: [{ name: 'glm', apiKeys: ['k1'] }] },
+    normalizeProviders({ providers: [{ name: 'glm', apiKeys: ['k1', 2] }, { bad: 1 }] }),
+    [{ name: 'glm', apiKeys: ['k1'] }],
   );
 });
 
-test('ensureConfig 不存在时写默认模板', () => {
+test('ensureProviders 不存在时写空模板', () => {
   const p = tmp();
   fs.rmSync(p, { force: true });
-  const cfg = ensureConfig(p);
-  assert.deepEqual(cfg, { mapping: 'pass', providers: [] });
+  assert.deepEqual(ensureProviders(p), []);
   assert.equal(fs.existsSync(p), true);
 });
 
-test('writeConfig + readConfig 往返', () => {
+test('writeProviders + readProviders 往返(文件仅含 providers)', () => {
   const p = tmp();
-  const cfg: ProxyConfig = { mapping: 'glm:glm-5', providers: [{ name: 'glm', apiKeys: ['k'] }] };
-  writeConfig(cfg, p);
-  assert.deepEqual(readConfig(p), cfg);
+  const providers: ProviderEntry[] = [{ name: 'glm', apiKeys: ['k'] }];
+  writeProviders(providers, p);
+  assert.deepEqual(readProviders(p), providers);
+  assert.deepEqual(JSON.parse(fs.readFileSync(p, 'utf8')), { providers });
 });
 
 test('addKey 新建与追加', () => {
