@@ -59,8 +59,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     applyConfig,
   });
 
-  // 启动时同步一次(不触发 reload)
-  syncProxy(readConfig());
+  // 注:启动时不在此同步代理 —— 端口尚未确定,统一由下方 server 'listening' 用真实端口回填
 
   // 命令:打开菜单(状态栏点击)
   context.subscriptions.push(
