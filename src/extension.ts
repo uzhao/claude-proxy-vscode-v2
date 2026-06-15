@@ -5,6 +5,8 @@ import { ProxyConfig, ensureProviders, readProviders, writeProviders, configPath
 import { createProxyServer } from './proxy';
 import { StatusBar } from './statusbar';
 import { GLOBAL_SETTINGS_PATH, clearProxy, setProxy, getProxy } from './claudeSettings';
+import { CodexAuth } from './codex/auth';
+import { loginCodex } from './codex/login';
 
 let server: http.Server | null = null;
 let currentPort = 4001;
@@ -64,6 +66,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   statusBar = new StatusBar({ context, getConfig, applyConfig });
 
+  const codexAuth = new CodexAuth(context.secrets);
+
   // 注:启动时不在此同步代理 —— 端口尚未确定,统一由下方 server 'listening' 用真实端口回填
 
   // 命令:打开菜单(状态栏点击)
@@ -77,9 +81,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       vscode.window.showTextDocument(doc);
     }),
   );
+  context.subscriptions.push(
+    vscode.commands.registerCommand('claudeProxy.codexLogin', () => loginCodex(codexAuth)),
+    vscode.commands.registerCommand('claudeProxy.codexLogout', async () => {
+      await codexAuth.logout();
+      vscode.window.showInformationMessage('已登出 Codex');
+    }),
+  );
 
   // 启动代理 server(随机端口,冲突漂移)
-  server = createProxyServer({ getConfig, isJsonLogging });
+  server = createProxyServer({ getConfig, isJsonLogging, getCodexAuth: () => codexAuth.getValid() });
   let retries = 0;
   const tryListen = () => {
     currentPort = randomPort();

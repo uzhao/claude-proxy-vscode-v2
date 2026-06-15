@@ -26,7 +26,7 @@ test('anthropic 格式 preset 无 translator(原样转发)', () => {
   assert.equal(getTranslator(getPreset('glm')!), null);
 });
 
-test('codex preset → responses 端点 + codex 请求(带 store:false)', { skip: true }, () => {
+test('codex preset → responses 端点 + codex 请求(带 store:false)', () => {
   const t = getTranslator(getPresetForCodex('codex')!)!;
   assert.equal(t.endpointPath, '/responses');
   const req = t.buildRequest({ messages: [{ role: 'user', content: 'hi' }] }, 'gpt-5-codex');

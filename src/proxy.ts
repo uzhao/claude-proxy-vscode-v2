@@ -79,6 +79,8 @@ export interface ProxyServerDeps {
   getConfig: () => ProxyConfig;
   /** 是否写 JSON 日志 */
   isJsonLogging: () => boolean;
+  /** 获取有效的 codex OAuth 凭证;未登录返回 null */
+  getCodexAuth?: () => Promise<{ accessToken: string; accountId: string } | null>;
 }
 
 /**
@@ -159,6 +161,60 @@ export function createProxyServer(deps: ProxyServerDeps): http.Server {
         }
         if (translator) {
           baseHeaders['content-type'] = 'application/json';
+        }
+
+        // codex:用 OAuth token 单次转发(不走 providers.json key 轮换)
+        if (target && target.preset.id === 'codex') {
+          const auth = deps.getCodexAuth ? await deps.getCodexAuth() : null;
+          if (!auth) {
+            res.writeHead(401, { 'content-type': 'application/json' });
+            res.end(anthropicError('authentication_error', 'codex 未登录,请在 Provider 设置中登录 ChatGPT。'));
+            return;
+          }
+          const codexHeaders: Record<string, any> = {
+            ...baseHeaders,
+            'authorization': `Bearer ${auth.accessToken}`,
+            'chatgpt-account-id': auth.accountId,
+            'originator': 'codex-tui',
+            'accept': 'text/event-stream',
+          };
+          try {
+            const upstream = await fetch(targetUrl, { method: 'POST', headers: codexHeaders as any, body: targetBody });
+            console.log(`[proxy] codex upstream status ${upstream.status}`);
+            if (upstream.status >= 400) {
+              const errText = await upstream.text();
+              res.writeHead(upstream.status, { 'content-type': 'application/json' });
+              res.end(anthropicError('upstream_error', errText.slice(0, 2000)));
+              return;
+            }
+            res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
+            const parser = new SSEParser();
+            const stream = translator!.createStreamTranslator();
+            const reader = upstream.body?.getReader();
+            const decoder = new TextDecoder();
+            if (reader) {
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done) {
+                  break;
+                }
+                for (const payload of parser.push(decoder.decode(value, { stream: true }))) {
+                  for (const event of stream.push(payload)) {
+                    if (!res.write(event)) {
+                      await new Promise<void>(resolve => res.once('drain', resolve));
+                    }
+                  }
+                }
+              }
+            }
+            res.end();
+            return;
+          } catch (err) {
+            console.error('[proxy] codex error:', err);
+            res.writeHead(500, { 'content-type': 'application/json' });
+            res.end(anthropicError('api_error', String((err as any)?.message ?? err)));
+            return;
+          }
         }
 
         const tryKeys = apiKeys.length > 0 ? apiKeys : [null];

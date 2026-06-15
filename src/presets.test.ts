@@ -2,10 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { PRESETS, getPreset, CODEX_PLACEHOLDER_ID } from './presets';
 
-test('包含 7 个可配置 preset,且不含 codex 占位', () => {
+test('包含 8 个可配置 preset,codex 已成为正式 preset', () => {
   const ids = PRESETS.map(p => p.id);
-  assert.deepEqual(ids, ['openai', 'openrouter', 'nvidia', 'glm', 'kimi', 'deepseek', 'minimax']);
-  assert.equal(ids.includes(CODEX_PLACEHOLDER_ID), false);
+  assert.deepEqual(ids, ['openai', 'openrouter', 'nvidia', 'glm', 'kimi', 'deepseek', 'minimax', 'codex']);
+  // codex 已升格为正式 preset,CODEX_PLACEHOLDER_ID 仅保留常量供外部引用
+  assert.equal(getPreset(CODEX_PLACEHOLDER_ID)?.id, 'codex');
 });
 
 test('国产四家为 anthropic 格式且 forwardable', () => {

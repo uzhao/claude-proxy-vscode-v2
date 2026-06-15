@@ -27,6 +27,7 @@ export const PRESETS: Preset[] = [
   { id: 'kimi',       format: 'anthropic', baseUrl: 'https://api.moonshot.cn/anthropic',          modelsDevId: 'moonshotai', forwardable: true,  api: 'chat' },
   { id: 'deepseek',   format: 'anthropic', baseUrl: 'https://api.deepseek.com/anthropic',         modelsDevId: 'deepseek',   forwardable: true,  api: 'chat' },
   { id: 'minimax',    format: 'anthropic', baseUrl: 'https://api.minimaxi.com/anthropic',         modelsDevId: 'minimax',    forwardable: true,  api: 'chat' },
+  { id: 'codex',      format: 'openai',    baseUrl: 'https://chatgpt.com/backend-api/codex',      modelsDevId: 'openai',     forwardable: true,  api: 'responses' },
 ];
 
 export function getPreset(id: string): Preset | undefined {
