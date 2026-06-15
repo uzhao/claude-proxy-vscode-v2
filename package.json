@@ -41,10 +41,6 @@
       {
         "command": "claudeProxy.openMenu",
         "title": "Claude Proxy: 打开菜单"
-      },
-      {
-        "command": "claudeProxy.editConfig",
-        "title": "Claude Proxy: 编辑配置文件"
       }
     ],
     "configuration": [
@@ -55,12 +51,6 @@
             "type": "number",
             "default": 4001,
             "description": "本地代理监听端口(固定使用;被占用时会报错,请改此值后重载窗口)",
-            "scope": "machine"
-          },
-          "claudeProxy.enableJsonLogging": {
-            "type": "boolean",
-            "default": false,
-            "description": "是否将请求和响应保存为JSON文件到~/.claude/proxy/log目录",
             "scope": "machine"
           }
         }
