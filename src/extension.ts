@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as http from 'http';
 import * as path from 'path';
-import { ProxyConfig, ensureConfig, readConfig, writeConfig, configPath } from './config';
+import { ProxyConfig, ensureProviders, readProviders, writeProviders, configPath } from './config';
 import { createProxyServer } from './proxy';
 import { StatusBar } from './statusbar';
 import { GLOBAL_SETTINGS_PATH, clearProxy, setProxy, getProxy } from './claudeSettings';
@@ -9,6 +9,7 @@ import { GLOBAL_SETTINGS_PATH, clearProxy, setProxy, getProxy } from './claudeSe
 let server: http.Server | null = null;
 let currentPort = 4001;
 let statusBar: StatusBar;
+const MAPPING_KEY = 'claudeProxy.mapping';
 
 function randomPort(): number {
   return Math.floor(Math.random() * (65535 - 1024 + 1)) + 1024;
@@ -41,11 +42,19 @@ function syncProxy(cfg: ProxyConfig): boolean {
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   console.log('Claude Proxy activating...');
 
-  ensureConfig();
+  ensureProviders();
 
-  // applyConfig:写盘 + 同步代理 + 刷新状态栏;代理开关翻转时重载窗口
-  const applyConfig = (cfg: ProxyConfig) => {
-    writeConfig(cfg);
+  // 组合运行时视图:mapping(本项目 workspaceState)+ providers(全局 providers.json)
+  const getConfig = (): ProxyConfig => ({
+    mapping: context.workspaceState.get<string>(MAPPING_KEY, 'pass'),
+    providers: readProviders(),
+  });
+
+  // applyConfig:拆分落地(providers→全局文件,mapping→本项目)+ 同步代理 + 刷新;开关翻转才 reload
+  // 必须 await mapping 写入再 reload —— 否则窗口可能在持久化前重载,导致 per-project mapping 丢失
+  const applyConfig = async (cfg: ProxyConfig) => {
+    writeProviders(cfg.providers);
+    await context.workspaceState.update(MAPPING_KEY, cfg.mapping);
     const flipped = syncProxy(cfg);
     statusBar.refresh();
     if (flipped) {
@@ -53,11 +62,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
   };
 
-  statusBar = new StatusBar({
-    context,
-    getConfig: () => readConfig(),
-    applyConfig,
-  });
+  statusBar = new StatusBar({ context, getConfig, applyConfig });
 
   // 注:启动时不在此同步代理 —— 端口尚未确定,统一由下方 server 'listening' 用真实端口回填
 
@@ -74,7 +79,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
 
   // 启动代理 server(随机端口,冲突漂移)
-  server = createProxyServer({ getConfig: () => readConfig(), isJsonLogging });
+  server = createProxyServer({ getConfig, isJsonLogging });
   let retries = 0;
   const tryListen = () => {
     currentPort = randomPort();
@@ -82,7 +87,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   };
   server.on('listening', () => {
     console.log(`proxy listening on http://127.0.0.1:${currentPort}`);
-    syncProxy(readConfig()); // 用真实端口回填
+    syncProxy(getConfig()); // 用真实端口回填
   });
   server.on('error', (err: any) => {
     if (err.code === 'EADDRINUSE' && retries < 10) {
