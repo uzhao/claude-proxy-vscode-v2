@@ -15,7 +15,8 @@ openrouter / nvidia 只支持 chat completions,继续用 Part 2a 的转换。Res
 - **做**:Anthropic Messages ↔ OpenAI Responses API 双向转换,服务 **openai**。功能含文本、工具调用、图片、thinking(reasoning)、SSE 流式。
 - **仅流式**:对上游用 `stream:true`,做增量 SSE 转换;不实现非流式响应路径。
 - **剥离 codex 专属(留 Part 3)**:`instructions` 注入、reasoning `encrypted_content`/signature 校验、web_search 工具特殊处理、ChatGPT 专属 headers。
-- **不做**:gemini(已放弃)、codex OAuth(Part 3)、prompt caching。
+- **移除 gemini provider**:gemini 已放弃,从 `PRESETS` 与 `ProviderFormat` 中删除(连同测试中对 gemini 的断言),避免留下死配置。
+- **不做**:codex OAuth(Part 3)、prompt caching。
 
 ## 架构
 
@@ -32,7 +33,7 @@ src/translate/
   responses/request.test.ts / response.test.ts
 ```
 
-**preset 区分**:`Preset` 接口加字段 `api: 'chat' | 'responses'`(默认 `'chat'`)。openai 设 `'responses'`;openrouter/nvidia/其余保持 `'chat'`。
+**preset 区分**:先从 `PRESETS` 移除 gemini(移除后为 openai/openrouter/nvidia/glm/kimi/deepseek/minimax 共 7 个)。`Preset` 接口加字段 `api: 'chat' | 'responses'`(默认 `'chat'`)。openai 设 `'responses'`;openrouter/nvidia/其余保持 `'chat'`。
 
 **registry 分发**:`getTranslator` 签名由 `(format: ProviderFormat)` 改为 `(preset: Preset)`,内部按 `preset.api` 返回 responses 或 chat-completions translator。`Translator` 接口不变(`/v1/responses`、`authHeader` 用 `Bearer`、model 在 body,与现有接口兼容)。proxy.ts 调用点相应改为传 preset。
 
