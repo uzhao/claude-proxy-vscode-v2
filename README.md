@@ -11,6 +11,7 @@
   - **OpenAI Chat Completions** —— 兼容平台/聚合网关
   - **OpenAI Responses API** —— OpenAI 官方(gpt-5 系)
   - **ChatGPT(codex)** —— OAuth 登录后用订阅额度
+- **OpenAI 官方 flex / 每日免费额度** —— 在 openai provider 子菜单里三个开关:`flex`(注入 `service_tier: "flex"`,更便宜更慢)、`freeTokens`(参与官方数据共享计划时,按 UTC 天计量 1M / 10M 两个共享池)、`freeTokensOnly`(只用免费额度,池用尽或模型不在免费列表则停用该请求)。跨 UTC 0 点自动归零。
 - **API key 轮换** —— 一个 provider 配多个 key,遇 401/429/5xx 自动切换下一个。
 - **透传模式** —— 选 `Pass` 不改请求,直连 Claude 官方。
 - 转发覆盖**文本、工具调用、图片、thinking、SSE 流式**。
@@ -26,7 +27,7 @@
 
 ## 🔧 工作原理
 
-- 本地 HTTP 代理(随机端口),通过项目 `.claude/settings.json` 的 `ANTHROPIC_BASE_URL` 接入 Claude Code。
+- 本地 HTTP 代理(固定起始端口 `claudeProxy.port`,默认 4001,被占用时自动递增),通过项目 `.claude/settings.json` 的 `ANTHROPIC_BASE_URL` 接入 Claude Code。
 - `mapping = pass` 时透传到 `api.anthropic.com`;否则按目标 provider 的格式转换请求、转发,并把上游的流式响应回译为 Anthropic SSE 返回给 Claude Code。
 - provider API key 与 codex OAuth 凭证均存入**系统密钥链**(VSCode SecretStorage),不落明文磁盘;模型列表缓存于 VSCode globalState。
 
