@@ -117,10 +117,11 @@ export class CodexAuth {
       // 写回:重新读取后按 accountId 定位(刷新期间列表可能已变)
       const latest = await this.readAll();
       const idx = next.accountId ? latest.findIndex(a => a.accountId === next.accountId) : i;
-      if (idx >= 0) {
+      if (idx >= 0 && idx < latest.length) {
         latest[idx] = next;
       } else {
-        latest[i] = next;
+        // 刷新期间该下标已不存在(并发删除)→ 追加,避免越界写出 sparse array
+        latest.push(next);
       }
       await this.writeAll(latest);
       return { accessToken: next.accessToken, accountId: next.accountId };
