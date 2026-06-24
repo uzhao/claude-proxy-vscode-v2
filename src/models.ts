@@ -70,3 +70,29 @@ export async function getCatalog(cache: CatalogCache, fetcher: typeof fetch = fe
   cache.write(catalog);
   return catalog;
 }
+
+/** 纯解析:OpenAI 兼容 /v1/models 响应 { data: [{ id }] } → ModelInfo[](按 id 升序) */
+export function parseEndpointModels(json: any): ModelInfo[] {
+  const data = json?.data;
+  if (!Array.isArray(data)) {
+    return [];
+  }
+  const list: ModelInfo[] = data
+    .filter((m: any) => m && typeof m.id === 'string')
+    .map((m: any) => ({ id: m.id, name: m.id, releaseDate: '' }));
+  list.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  return list;
+}
+
+/** 拉取自定义 provider 的模型列表:GET {baseUrl}/v1/models(可选 Bearer)。fetcher 可注入用于测试。 */
+export async function fetchEndpointModels(baseUrl: string, key?: string, fetcher: typeof fetch = fetch): Promise<ModelInfo[]> {
+  const headers: Record<string, string> = {};
+  if (key) {
+    headers['Authorization'] = `Bearer ${key}`;
+  }
+  const res = await fetcher(`${baseUrl}/v1/models`, { headers });
+  if (!res.ok) {
+    throw new Error(`models endpoint fetch failed: ${res.status}`);
+  }
+  return parseEndpointModels(await res.json());
+}
