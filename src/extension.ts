@@ -97,14 +97,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     vscode.commands.registerCommand('claudeProxy.codexLogin', () => loginCodex(codexAuth)),
     vscode.commands.registerCommand('claudeProxy.codexLogout', async () => {
-      await codexAuth.logout();
+      await codexAuth.logoutAll();
       vscode.window.showInformationMessage('已登出 Codex');
     }),
   );
 
   // 启动代理 server:固定起始端口(claudeProxy.port,默认 4001),被占则递增找可用
   // —— 单项目稳定用起始端口;同机多项目窗口并行时各自往后挑,互不冲突。实际端口回填到项目 settings.json。
-  server = createProxyServer({ getConfig, getCodexAuth: () => codexAuth.getValid() });
+  server = createProxyServer({ getConfig, getCodexAuth: () => codexAuth.validAt(0) });
   const startPort = configuredPort();
   currentPort = startPort;
   let portRetries = 0;
