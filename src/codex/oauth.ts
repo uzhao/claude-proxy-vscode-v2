@@ -82,3 +82,17 @@ export function parseAccountId(idToken: string): string {
     return '';
   }
 }
+
+/** 解析 id_token(JWT,不验签)取邮箱:优先 profile.email,回退顶层 email;失败返回 '' */
+export function parseEmail(idToken: string): string {
+  try {
+    const parts = idToken.split('.');
+    if (parts.length !== 3) {
+      return '';
+    }
+    const claims = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+    return claims?.['https://api.openai.com/profile']?.email ?? claims?.email ?? '';
+  } catch {
+    return '';
+  }
+}
