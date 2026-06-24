@@ -236,7 +236,7 @@ export class StatusBar {
     }
     if (picked.act === 'del') {
       let next = removeCustomProvider(this.deps.getConfig(), id);
-      if (next.mapping.slice(0, next.mapping.indexOf(':')) === id) {
+      if (next.mapping.split(':')[0] === id) {
         next = setMapping(next, 'pass');
       }
       this.deps.applyConfig(next);
