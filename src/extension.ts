@@ -9,6 +9,10 @@ import { StatusBar } from './statusbar';
 import { GLOBAL_SETTINGS_PATH, clearProxy, setProxy, getProxy } from './claudeSettings';
 import { CodexAuth, parseImportedCredential } from './codex/auth';
 import { loginCodex } from './codex/login';
+import {
+  OpenAIOfficialSettings, DEFAULT_OPENAI_SETTINGS, OpenAIUsageState, readUsage, addUsage,
+  OPENAI_SETTINGS_KEY, OPENAI_USAGE_KEY,
+} from './openai/freeTokens';
 
 let server: http.Server | null = null;
 let currentPort = 4001;
@@ -130,6 +134,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
+  // openai 官方免费额度:settings/usage 均存 globalState;used/add 按当前 UTC 日期判断
+  const openaiAccess = {
+    settings: (): OpenAIOfficialSettings =>
+      context.globalState.get<OpenAIOfficialSettings>(OPENAI_SETTINGS_KEY, DEFAULT_OPENAI_SETTINGS),
+    used: (p: '1M' | '10M'): number =>
+      readUsage(context.globalState.get<OpenAIUsageState>(OPENAI_USAGE_KEY), p, Date.now()),
+    add: (p: '1M' | '10M', tokens: number): void => {
+      const next = addUsage(context.globalState.get<OpenAIUsageState>(OPENAI_USAGE_KEY), p, tokens, Date.now());
+      void context.globalState.update(OPENAI_USAGE_KEY, next);
+    },
+  };
+
   // 启动代理 server:固定起始端口(claudeProxy.port,默认 4001),被占则递增找可用
   // —— 单项目稳定用起始端口;同机多项目窗口并行时各自往后挑,互不冲突。实际端口回填到项目 settings.json。
   server = createProxyServer({
@@ -140,6 +156,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         validAt: (i) => codexAuth.validAt(i),
         markSuccess: (i) => codexAuth.markSuccess(i),
       },
+      openai: openaiAccess,
     });
   const startPort = configuredPort();
   currentPort = startPort;
