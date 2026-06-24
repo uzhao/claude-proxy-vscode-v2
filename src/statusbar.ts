@@ -58,7 +58,8 @@ export class StatusBar {
         shownNames.push(id);
       }
     }
-    const codexIn = await this.deps.codexAuth.isLoggedIn();
+    const codexCount = await this.deps.codexAuth.count();
+    const codexIn = codexCount > 0;
     if (shownNames.length > 0 || codexIn) {
       items.push({ label: 'Provider', kind: vscode.QuickPickItemKind.Separator });
       const customSet = new Set(customIds);
@@ -68,7 +69,7 @@ export class StatusBar {
         items.push({ label: `$(server) ${name}`, description, action: 'provider', value: name });
       }
       if (codexIn && !shownNames.includes('codex')) {
-        items.push({ label: `$(server) codex`, description: '已登录', action: 'provider', value: 'codex' });
+        items.push({ label: `$(server) codex`, description: `已登录 ${codexCount} 个账号`, action: 'provider', value: 'codex' });
       }
     }
 
@@ -182,8 +183,8 @@ export class StatusBar {
     items.push({ label: '', kind: vscode.QuickPickItemKind.Separator });
     items.push({ label: '$(add) 添加自定义 provider', add: true });
 
-    const codexIn = await this.deps.codexAuth.isLoggedIn();
-    items.push({ label: CODEX_PLACEHOLDER_ID, description: codexIn ? '已登录(点击登出)' : '未登录(点击登录 ChatGPT)', codex: true });
+    const codexCount = await this.deps.codexAuth.count();
+    items.push({ label: CODEX_PLACEHOLDER_ID, description: codexCount > 0 ? `已登录 ${codexCount} 个账号` : '未登录(点击登录 ChatGPT)', codex: true });
     items.push({ label: '', kind: vscode.QuickPickItemKind.Separator });
     const curPort = vscode.workspace.getConfiguration('claudeProxy').get<number>('port', 4001);
     items.push({ label: '$(plug) 代理端口', description: `当前 ${curPort}`, port: true });
@@ -201,14 +202,7 @@ export class StatusBar {
       return;
     }
     if (picked.codex) {
-      if (codexIn) {
-        const pick = await vscode.window.showQuickPick(['登出 Codex'], { placeHolder: 'codex 已登录' });
-        if (pick === '登出 Codex') {
-          await vscode.commands.executeCommand('claudeProxy.codexLogout');
-        }
-      } else {
-        await vscode.commands.executeCommand('claudeProxy.codexLogin');
-      }
+      await this.manageCodex();
       return;
     }
     if (picked.customId) {
@@ -217,6 +211,42 @@ export class StatusBar {
     }
     if (picked.id) {
       await this.manageKeys(picked.id);
+    }
+  }
+
+  // ---- codex 账号管理:逐账号登出 / OAuth 登录 / 粘贴 JSON 导入 ----
+  private async manageCodex(): Promise<void> {
+    type CItem = vscode.QuickPickItem & { accountId?: string; login?: boolean; import?: boolean };
+    const accounts = await this.deps.codexAuth.list();
+    const items: CItem[] = accounts.map(a => ({
+      label: `$(account) ${a.email || a.accountId || '(unknown)'}`,
+      description: '点击登出此账号',
+      accountId: a.accountId,
+    }));
+    if (accounts.length > 0) {
+      items.push({ label: '', kind: vscode.QuickPickItemKind.Separator });
+    }
+    items.push({ label: '$(sign-in) 登录新账号(ChatGPT OAuth)', login: true });
+    items.push({ label: '$(clippy) 粘贴凭证 JSON…', import: true });
+
+    const picked = await vscode.window.showQuickPick(items, { placeHolder: 'codex 账号管理' });
+    if (!picked) {
+      return;
+    }
+    if (picked.login) {
+      await vscode.commands.executeCommand('claudeProxy.codexLogin');
+      return;
+    }
+    if (picked.import) {
+      await vscode.commands.executeCommand('claudeProxy.codexImport');
+      return;
+    }
+    if (picked.accountId !== undefined) {
+      const name = picked.label.replace(/^\$\(account\) /, '');
+      const confirm = await vscode.window.showWarningMessage(`登出 codex 账号 ${name}?`, '登出');
+      if (confirm === '登出') {
+        await vscode.commands.executeCommand('claudeProxy.codexLogout', picked.accountId);
+      }
     }
   }
 
