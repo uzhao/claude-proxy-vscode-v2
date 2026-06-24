@@ -3,6 +3,7 @@ import { ProxyConfig, configuredProviders, addKey, removeKey, setMapping, addCus
 import { PRESETS, CODEX_PLACEHOLDER_ID, resolvePreset } from './presets';
 import { parseProviderModels, filterFeatured, fetchEndpointModels, ModelInfo } from './models';
 import { CodexAuth } from './codex/auth';
+import { OpenAIOfficialSettings, DEFAULT_OPENAI_SETTINGS, OPENAI_SETTINGS_KEY } from './openai/freeTokens';
 
 const MRU_KEY = 'claudeProxy.recentMappings';
 const MRU_MAX = 5;
@@ -209,6 +210,10 @@ export class StatusBar {
       await this.manageCustomProvider(picked.customId);
       return;
     }
+    if (picked.id === 'openai') {
+      await this.manageOpenAI();
+      return;
+    }
     if (picked.id) {
       await this.manageKeys(picked.id);
     }
@@ -247,6 +252,34 @@ export class StatusBar {
       if (confirm === '登出') {
         await vscode.commands.executeCommand('claudeProxy.codexLogout', picked.accountId);
       }
+    }
+  }
+
+  // ---- openai 官方:管理 key + flex / 免费额度三开关 ----
+  private async manageOpenAI(): Promise<void> {
+    type OItem = vscode.QuickPickItem & { keys?: boolean; toggle?: keyof OpenAIOfficialSettings };
+    const ctx = this.deps.context;
+    const s = ctx.globalState.get<OpenAIOfficialSettings>(OPENAI_SETTINGS_KEY, DEFAULT_OPENAI_SETTINGS);
+    const mark = (b: boolean) => (b ? '$(check) 开' : '$(circle-slash) 关');
+    const items: OItem[] = [
+      { label: '$(key) 管理 API key', keys: true },
+      { label: '', kind: vscode.QuickPickItemKind.Separator },
+      { label: 'flex 档位', description: mark(s.flex), toggle: 'flex' },
+      { label: '每日免费额度', description: mark(s.freeTokens), toggle: 'freeTokens' },
+      { label: '仅用免费额度', description: mark(s.freeTokensOnly), toggle: 'freeTokensOnly' },
+    ];
+    const picked = await vscode.window.showQuickPick(items, { placeHolder: 'openai 官方设置' });
+    if (!picked) {
+      return;
+    }
+    if (picked.keys) {
+      await this.manageKeys('openai');
+      return;
+    }
+    if (picked.toggle) {
+      const next: OpenAIOfficialSettings = { ...s, [picked.toggle]: !s[picked.toggle] };
+      await ctx.globalState.update(OPENAI_SETTINGS_KEY, next);
+      await this.manageOpenAI(); // 切换后刷新菜单
     }
   }
 
