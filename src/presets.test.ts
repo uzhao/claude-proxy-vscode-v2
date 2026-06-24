@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { PRESETS, getPreset, CODEX_PLACEHOLDER_ID } from './presets';
+import { PRESETS, getPreset, CODEX_PLACEHOLDER_ID, customToPreset, resolvePreset } from './presets';
+import { ProxyConfig } from './config';
 
 test('包含 8 个可配置 preset,codex 已成为正式 preset', () => {
   const ids = PRESETS.map(p => p.id);
@@ -32,9 +33,6 @@ test('preset 映射到正确的 models.dev id', () => {
 test('getPreset 未知返回 undefined', () => {
   assert.equal(getPreset('nope'), undefined);
 });
-
-import { customToPreset, resolvePreset } from './presets';
-import { ProxyConfig } from './config';
 
 test('customToPreset 产出 openai/chat 且 custom=true', () => {
   const p = customToPreset({ id: 'ollama', baseUrl: 'http://localhost:11434' });
