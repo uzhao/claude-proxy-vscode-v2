@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveTarget, shouldRotate } from './proxy';
+import { resolveTarget, shouldRotate, pickCodexSequence } from './proxy';
 import { ProxyConfig } from './config';
 
 const withGlm: ProxyConfig = { mapping: 'glm:glm-4.6', providers: [{ name: 'glm', apiKeys: ['k1', 'k2'] }] };
@@ -74,4 +74,13 @@ test('自定义 provider 有 key 时带上 key', () => {
     customProviders: [{ id: 'ollama', baseUrl: 'http://localhost:11434' }],
   };
   assert.deepEqual(resolveTarget(cfg)!.apiKeys, ['sk-x']);
+});
+
+test('pickCodexSequence 从游标起轮转并回绕', () => {
+  assert.deepEqual(pickCodexSequence(3, 0), [0, 1, 2]);
+  assert.deepEqual(pickCodexSequence(3, 1), [1, 2, 0]);
+  assert.deepEqual(pickCodexSequence(3, 2), [2, 0, 1]);
+  assert.deepEqual(pickCodexSequence(3, 5), [2, 0, 1]); // 5 % 3 = 2
+  assert.deepEqual(pickCodexSequence(1, 0), [0]);
+  assert.deepEqual(pickCodexSequence(0, 0), []);
 });

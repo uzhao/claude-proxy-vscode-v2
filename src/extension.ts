@@ -7,7 +7,7 @@ import { getCatalog, CatalogCache } from './models';
 import { createProxyServer } from './proxy';
 import { StatusBar } from './statusbar';
 import { GLOBAL_SETTINGS_PATH, clearProxy, setProxy, getProxy } from './claudeSettings';
-import { CodexAuth } from './codex/auth';
+import { CodexAuth, parseImportedCredential } from './codex/auth';
 import { loginCodex } from './codex/login';
 
 let server: http.Server | null = null;
@@ -95,16 +95,52 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand('claudeProxy.openMenu', () => statusBar.openMenu()),
   );
   context.subscriptions.push(
-    vscode.commands.registerCommand('claudeProxy.codexLogin', () => loginCodex(codexAuth)),
-    vscode.commands.registerCommand('claudeProxy.codexLogout', async () => {
-      await codexAuth.logout();
-      vscode.window.showInformationMessage('已登出 Codex');
+    vscode.commands.registerCommand('claudeProxy.codexLogin', async () => {
+      const ok = await loginCodex(codexAuth);
+      if (ok) {
+        statusBar.refresh();
+      }
+    }),
+    vscode.commands.registerCommand('claudeProxy.codexLogout', async (accountId?: string) => {
+      if (accountId) {
+        await codexAuth.removeByAccountId(accountId);
+      } else {
+        await codexAuth.logoutAll();
+      }
+      statusBar.refresh();
+      vscode.window.showInformationMessage('codex account logged out');
+    }),
+    vscode.commands.registerCommand('claudeProxy.codexImport', async () => {
+      const text = await vscode.window.showInputBox({
+        prompt: '粘贴 codex 凭证 JSON',
+        placeHolder: '{"access_token":"...","refresh_token":"...",...}',
+        ignoreFocusOut: true,
+        password: true,
+      });
+      if (!text) {
+        return;
+      }
+      try {
+        await codexAuth.add(parseImportedCredential(text));
+        statusBar.refresh();
+        vscode.window.showInformationMessage('codex credential imported');
+      } catch (e) {
+        vscode.window.showErrorMessage(`codex import failed: ${String((e as any)?.message ?? e)}`);
+      }
     }),
   );
 
   // 启动代理 server:固定起始端口(claudeProxy.port,默认 4001),被占则递增找可用
   // —— 单项目稳定用起始端口;同机多项目窗口并行时各自往后挑,互不冲突。实际端口回填到项目 settings.json。
-  server = createProxyServer({ getConfig, getCodexAuth: () => codexAuth.getValid() });
+  server = createProxyServer({
+      getConfig,
+      codex: {
+        count: () => codexAuth.count(),
+        startIndex: () => codexAuth.startIndex(),
+        validAt: (i) => codexAuth.validAt(i),
+        markSuccess: (i) => codexAuth.markSuccess(i),
+      },
+    });
   const startPort = configuredPort();
   currentPort = startPort;
   let portRetries = 0;

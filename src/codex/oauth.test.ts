@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildAuthUrl, exchangeCode, refreshToken, parseAccountId, REDIRECT_URI } from './oauth';
+import { buildAuthUrl, exchangeCode, refreshToken, parseAccountId, parseEmail, REDIRECT_URI } from './oauth';
 
 test('buildAuthUrl 含必需参数', () => {
   const url = new URL(buildAuthUrl('chal123', 'state456'));
@@ -55,4 +55,12 @@ test('parseAccountId 从 id_token 取 chatgpt_account_id', () => {
   const idToken = `header.${payload}.sig`;
   assert.equal(parseAccountId(idToken), 'acc_1');
   assert.equal(parseAccountId('bad'), '');
+});
+
+test('parseEmail 从 id_token 取邮箱(profile 优先,回退顶层 email)', () => {
+  const p1 = Buffer.from(JSON.stringify({ 'https://api.openai.com/profile': { email: 'p@b.c' }, email: 'top@b.c' })).toString('base64url');
+  assert.equal(parseEmail(`h.${p1}.s`), 'p@b.c');
+  const p2 = Buffer.from(JSON.stringify({ email: 'top@b.c' })).toString('base64url');
+  assert.equal(parseEmail(`h.${p2}.s`), 'top@b.c');
+  assert.equal(parseEmail('bad'), '');
 });
