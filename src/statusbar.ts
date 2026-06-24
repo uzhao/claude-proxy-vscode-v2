@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { ProxyConfig, configuredProviders, addKey, removeKey, setMapping } from './config';
+import { ProxyConfig, configuredProviders, addKey, removeKey, setMapping, addCustomProvider, updateCustomProvider, removeCustomProvider, normalizeBaseUrl } from './config';
 import { PRESETS, CODEX_PLACEHOLDER_ID, getPreset } from './presets';
 import { parseProviderModels, filterFeatured, ModelInfo } from './models';
 import { CodexAuth } from './codex/auth';
@@ -112,14 +112,26 @@ export class StatusBar {
     }
   }
 
-  // ---- Provider 设置:选 provider → 管理 key / codex 登录登出 / 改端口 ----
+  // ---- Provider 设置:内置管 key / 自定义增删改 / codex 登录登出 / 改端口 ----
   private async providerSettings(): Promise<void> {
-    type Item = vscode.QuickPickItem & { id?: string; codex?: boolean; port?: boolean };
+    type Item = vscode.QuickPickItem & { id?: string; customId?: string; add?: boolean; codex?: boolean; port?: boolean };
     const cfg = this.deps.getConfig();
     const items: Item[] = PRESETS.filter(p => p.id !== 'codex').map(p => {
       const n = cfg.providers.find(x => x.name === p.id)?.apiKeys.length ?? 0;
       return { label: p.id, description: n > 0 ? `${n} key` : '未配置', id: p.id };
     });
+
+    const customs = cfg.customProviders ?? [];
+    if (customs.length > 0) {
+      items.push({ label: '自定义', kind: vscode.QuickPickItemKind.Separator });
+      for (const c of customs) {
+        const n = cfg.providers.find(x => x.name === c.id)?.apiKeys.length ?? 0;
+        items.push({ label: c.id, description: `${c.baseUrl}${n > 0 ? ` · ${n} key` : ''}`, customId: c.id });
+      }
+    }
+    items.push({ label: '', kind: vscode.QuickPickItemKind.Separator });
+    items.push({ label: '$(add) 添加自定义 provider', add: true });
+
     const codexIn = await this.deps.codexAuth.isLoggedIn();
     items.push({ label: CODEX_PLACEHOLDER_ID, description: codexIn ? '已登录(点击登出)' : '未登录(点击登录 ChatGPT)', codex: true });
     items.push({ label: '', kind: vscode.QuickPickItemKind.Separator });
@@ -128,6 +140,10 @@ export class StatusBar {
 
     const picked = await vscode.window.showQuickPick(items, { placeHolder: '选择 provider 管理' });
     if (!picked) {
+      return;
+    }
+    if (picked.add) {
+      await this.addCustomProviderFlow();
       return;
     }
     if (picked.port) {
@@ -145,8 +161,85 @@ export class StatusBar {
       }
       return;
     }
+    if (picked.customId) {
+      await this.manageCustomProvider(picked.customId);
+      return;
+    }
     if (picked.id) {
       await this.manageKeys(picked.id);
+    }
+  }
+
+  // ---- 添加自定义 provider:输入 id + baseUrl ----
+  private async addCustomProviderFlow(): Promise<void> {
+    const cfg = this.deps.getConfig();
+    const existing = new Set<string>([...PRESETS.map(p => p.id), ...(cfg.customProviders ?? []).map(c => c.id)]);
+    const id = await vscode.window.showInputBox({
+      prompt: '自定义 provider 标识(用作映射前缀,如 ollama)',
+      validateInput: (v) => {
+        const s = v.trim();
+        if (!s) {
+          return 'id 不能为空';
+        }
+        if (s.includes(':')) {
+          return 'id 不能包含冒号';
+        }
+        if (existing.has(s)) {
+          return `id "${s}" 已存在`;
+        }
+        return null;
+      },
+    });
+    if (!id) {
+      return;
+    }
+    const baseUrl = await vscode.window.showInputBox({
+      prompt: 'Base URL(不含 /v1,例如 http://localhost:11434)',
+      validateInput: (v) => (/^https?:\/\//.test(v.trim()) ? null : '需以 http:// 或 https:// 开头'),
+    });
+    if (!baseUrl) {
+      return;
+    }
+    this.deps.applyConfig(addCustomProvider(this.deps.getConfig(), { id: id.trim(), baseUrl: normalizeBaseUrl(baseUrl.trim()) }));
+  }
+
+  // ---- 管理某自定义 provider:管 key / 改 baseUrl / 删除 ----
+  private async manageCustomProvider(id: string): Promise<void> {
+    const cp = (this.deps.getConfig().customProviders ?? []).find(c => c.id === id);
+    if (!cp) {
+      return;
+    }
+    type Item = vscode.QuickPickItem & { act?: 'keys' | 'edit' | 'del' };
+    const items: Item[] = [
+      { label: '$(key) 管理 key', description: '可选,本地服务通常不需要', act: 'keys' },
+      { label: '$(edit) 编辑 Base URL', description: cp.baseUrl, act: 'edit' },
+      { label: '$(trash) 删除', act: 'del' },
+    ];
+    const picked = await vscode.window.showQuickPick(items, { placeHolder: `${id}(自定义)` });
+    if (!picked) {
+      return;
+    }
+    if (picked.act === 'keys') {
+      await this.manageKeys(id);
+      return;
+    }
+    if (picked.act === 'edit') {
+      const baseUrl = await vscode.window.showInputBox({
+        prompt: 'Base URL(不含 /v1)',
+        value: cp.baseUrl,
+        validateInput: (v) => (/^https?:\/\//.test(v.trim()) ? null : '需以 http:// 或 https:// 开头'),
+      });
+      if (baseUrl) {
+        this.deps.applyConfig(updateCustomProvider(this.deps.getConfig(), id, normalizeBaseUrl(baseUrl.trim())));
+      }
+      return;
+    }
+    if (picked.act === 'del') {
+      let next = removeCustomProvider(this.deps.getConfig(), id);
+      if (next.mapping.slice(0, next.mapping.indexOf(':')) === id) {
+        next = setMapping(next, 'pass');
+      }
+      this.deps.applyConfig(next);
     }
   }
 
