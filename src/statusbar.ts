@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { ProxyConfig, configuredProviders, addKey, removeKey, setMapping, addCustomProvider, updateCustomProvider, removeCustomProvider, normalizeBaseUrl } from './config';
-import { PRESETS, CODEX_PLACEHOLDER_ID, getPreset } from './presets';
-import { parseProviderModels, filterFeatured, ModelInfo } from './models';
+import { PRESETS, CODEX_PLACEHOLDER_ID, resolvePreset } from './presets';
+import { parseProviderModels, filterFeatured, fetchEndpointModels, ModelInfo } from './models';
 import { CodexAuth } from './codex/auth';
 
 const MRU_KEY = 'claudeProxy.recentMappings';
@@ -49,14 +49,25 @@ export class StatusBar {
       items.push({ label: `$(history) ${m}`, action: 'mapping', value: m });
     }
 
-    const provs = configuredProviders(cfg);
-    const codexIn = await this.deps.codexAuth.isLoggedIn();
-    if (provs.length > 0 || codexIn) {
-      items.push({ label: 'Provider', kind: vscode.QuickPickItemKind.Separator });
-      for (const p of provs) {
-        items.push({ label: `$(server) ${p.name}`, description: `${p.apiKeys.length} key`, action: 'provider', value: p.name });
+    // Provider 区:有 key 的内置 + 全部自定义(无论是否有 key)
+    const withKey = configuredProviders(cfg).map(p => p.name);
+    const customIds = (cfg.customProviders ?? []).map(c => c.id);
+    const shownNames: string[] = [...withKey];
+    for (const id of customIds) {
+      if (!shownNames.includes(id)) {
+        shownNames.push(id);
       }
-      if (codexIn && !provs.some(p => p.name === 'codex')) {
+    }
+    const codexIn = await this.deps.codexAuth.isLoggedIn();
+    if (shownNames.length > 0 || codexIn) {
+      items.push({ label: 'Provider', kind: vscode.QuickPickItemKind.Separator });
+      const customSet = new Set(customIds);
+      for (const name of shownNames) {
+        const keyCount = cfg.providers.find(p => p.name === name)?.apiKeys.length ?? 0;
+        const description = keyCount > 0 ? `${keyCount} key` : (customSet.has(name) ? '自定义' : '');
+        items.push({ label: `$(server) ${name}`, description, action: 'provider', value: name });
+      }
+      if (codexIn && !shownNames.includes('codex')) {
         items.push({ label: `$(server) codex`, description: '已登录', action: 'provider', value: 'codex' });
       }
     }
@@ -81,10 +92,41 @@ export class StatusBar {
 
   // ---- 二级:选 provider 的模型 ----
   private async pickModel(providerName: string, showAll = false): Promise<void> {
-    const preset = getPreset(providerName);
+    const cfg = this.deps.getConfig();
+    const preset = resolvePreset(cfg, providerName);
     if (!preset) {
       return;
     }
+
+    // 自定义 provider:从 /v1/models 拉取(带可选 Bearer),拉不到则手填
+    if (preset.custom) {
+      const key = cfg.providers.find(p => p.name === providerName)?.apiKeys[0];
+      let models: ModelInfo[];
+      try {
+        models = await fetchEndpointModels(preset.baseUrl, key);
+      } catch (e) {
+        console.warn('[proxy] custom models fetch failed:', e);
+        await this.manualModel(providerName);
+        return;
+      }
+      type CItem = vscode.QuickPickItem & { model?: string; manual?: boolean };
+      const citems: CItem[] = models.map(m => ({ label: m.id, model: m.id }));
+      citems.push({ label: '$(edit) 手动输入…', manual: true });
+      const cpicked = await vscode.window.showQuickPick(citems, { placeHolder: `${providerName} 的模型` });
+      if (!cpicked) {
+        return;
+      }
+      if (cpicked.manual) {
+        await this.manualModel(providerName);
+        return;
+      }
+      if (cpicked.model) {
+        this.setMapping(`${providerName}:${cpicked.model}`);
+      }
+      return;
+    }
+
+    // 内置 provider:models.dev 路径
     let models: ModelInfo[] = [];
     try {
       const catalog = await this.deps.getCatalog();
@@ -109,6 +151,14 @@ export class StatusBar {
       await this.pickModel(providerName, true);
     } else if (picked.model) {
       this.setMapping(`${providerName}:${picked.model}`);
+    }
+  }
+
+  // ---- 手动输入模型名(自定义 provider 拉取失败或主动选择时) ----
+  private async manualModel(providerName: string): Promise<void> {
+    const model = await vscode.window.showInputBox({ prompt: `输入 ${providerName} 的模型名` });
+    if (model && model.trim()) {
+      this.setMapping(`${providerName}:${model.trim()}`);
     }
   }
 
