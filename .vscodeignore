@@ -17,6 +17,9 @@ docs/**
 # 第三方参考项目(仅本地参考,不打包)
 CLIProxyAPI/**
 
+# Agent 技能目录(仅本地使用,不打包)
+.superpowers/**
+
 # Git
 .git/**
 .github/**
