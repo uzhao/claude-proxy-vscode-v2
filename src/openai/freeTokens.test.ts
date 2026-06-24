@@ -7,6 +7,14 @@ import {
   OpenAIOfficialSettings,
 } from './freeTokens';
 
+import {
+  utcDateOf,
+  readUsage,
+  addUsage,
+  extractResponsesUsage,
+  OpenAIUsageState,
+} from './freeTokens';
+
 const zero = () => 0;
 const set = (s: Partial<OpenAIOfficialSettings>): OpenAIOfficialSettings => ({ ...DEFAULT_OPENAI_SETTINGS, ...s });
 
@@ -58,4 +66,38 @@ test('freeTokensOnly 开 + 池用尽:停用', () => {
 test('freeTokensOnly 开 + 模型不在列表:停用', () => {
   const p = planOpenAIRequest('gpt-9-unknown', set({ freeTokens: true, freeTokensOnly: true }), zero);
   assert.equal(p.allowed, false);
+});
+
+const T0 = Date.UTC(2026, 5, 24, 10, 0, 0); // 2026-06-24
+const T1 = Date.UTC(2026, 5, 25, 1, 0, 0);  // 2026-06-25(跨天)
+
+test('utcDateOf 输出 YYYY-MM-DD(UTC)', () => {
+  assert.equal(utcDateOf(T0), '2026-06-24');
+});
+
+test('readUsage:undefined / 同日 / 跨日归零', () => {
+  assert.equal(readUsage(undefined, '1M', T0), 0);
+  const s: OpenAIUsageState = { utcDate: '2026-06-24', used: { '1M': 500, '10M': 7 } };
+  assert.equal(readUsage(s, '1M', T0), 500);
+  assert.equal(readUsage(s, '1M', T1), 0); // 跨天视为 0
+});
+
+test('addUsage:同日累加 / 跨日重置后再累加', () => {
+  const s1 = addUsage(undefined, '1M', 100, T0);
+  assert.deepEqual(s1, { utcDate: '2026-06-24', used: { '1M': 100, '10M': 0 } });
+  const s2 = addUsage(s1, '1M', 50, T0);
+  assert.equal(s2.used['1M'], 150);
+  const s3 = addUsage(s2, '1M', 30, T1); // 跨天先归零
+  assert.deepEqual(s3, { utcDate: '2026-06-25', used: { '1M': 30, '10M': 0 } });
+});
+
+test('extractResponsesUsage:仅 response.completed 返回 input+output', () => {
+  const completed = JSON.stringify({
+    type: 'response.completed',
+    response: { usage: { input_tokens: 120, output_tokens: 30 } },
+  });
+  assert.equal(extractResponsesUsage(completed), 150);
+  assert.equal(extractResponsesUsage(JSON.stringify({ type: 'response.output_text.delta', delta: 'x' })), null);
+  assert.equal(extractResponsesUsage('not json'), null);
+  assert.equal(extractResponsesUsage(JSON.stringify({ type: 'response.completed', response: {} })), 0);
 });

@@ -72,3 +72,52 @@ export function planOpenAIRequest(
   const flex = settings.flex && !isFree;
   return { allowed, flex, pool };
 }
+
+export interface OpenAIUsageState {
+  utcDate: string; // 'YYYY-MM-DD'(UTC)
+  used: { '1M': number; '10M': number };
+}
+
+/** epoch ms → UTC 'YYYY-MM-DD' */
+export function utcDateOf(now: number): string {
+  return new Date(now).toISOString().slice(0, 10);
+}
+
+/** 读某池当日用量;state 缺失或非今日(UTC)视为 0 */
+export function readUsage(state: OpenAIUsageState | undefined, pool: Pool, now: number): number {
+  if (!state || state.utcDate !== utcDateOf(now)) {
+    return 0;
+  }
+  return state.used[pool] ?? 0;
+}
+
+/** 累加某池用量,返回新 state;跨 UTC 天先归零 */
+export function addUsage(
+  state: OpenAIUsageState | undefined,
+  pool: Pool,
+  tokens: number,
+  now: number,
+): OpenAIUsageState {
+  const today = utcDateOf(now);
+  const base: OpenAIUsageState =
+    state && state.utcDate === today ? state : { utcDate: today, used: { '1M': 0, '10M': 0 } };
+  return {
+    utcDate: today,
+    used: { ...base.used, [pool]: (base.used[pool] ?? 0) + tokens },
+  };
+}
+
+/** 解析一条 Responses SSE data 负载:response.completed → input+output;否则 null */
+export function extractResponsesUsage(payload: string): number | null {
+  let root: any;
+  try {
+    root = JSON.parse(payload);
+  } catch {
+    return null;
+  }
+  if (root?.type !== 'response.completed') {
+    return null;
+  }
+  const u = root.response?.usage ?? {};
+  return (u.input_tokens ?? 0) + (u.output_tokens ?? 0);
+}
