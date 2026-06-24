@@ -47,16 +47,37 @@ export function shouldRotate(status: number): boolean {
   return status === 401 || status === 429 || status >= 500;
 }
 
+/** 从 startIndex(对 count 取模)起、长度 count 的轮转下标序列;count<=0 返回 [] */
+export function pickCodexSequence(count: number, startIndex: number): number[] {
+  if (count <= 0) {
+    return [];
+  }
+  const start = ((startIndex % count) + count) % count;
+  const seq: number[] = [];
+  for (let off = 0; off < count; off++) {
+    seq.push((start + off) % count);
+  }
+  return seq;
+}
+
 /** 构造 Anthropic 标准错误响应体 */
 function anthropicError(type: string, message: string): string {
   return JSON.stringify({ type: 'error', error: { type, message } });
 }
 
+/** codex 多账号访问接口:计数 / 游标 / 按下标取有效凭证 / 标记成功 */
+export interface CodexAccess {
+  count(): Promise<number>;
+  startIndex(): number;
+  validAt(i: number): Promise<{ accessToken: string; accountId: string } | null>;
+  markSuccess(i: number): void;
+}
+
 export interface ProxyServerDeps {
   /** 读取当前配置(每次请求实时读,保证热更新) */
   getConfig: () => ProxyConfig;
-  /** 获取有效的 codex OAuth 凭证;未登录返回 null */
-  getCodexAuth?: () => Promise<{ accessToken: string; accountId: string } | null>;
+  /** codex 多账号凭证访问;未登录时 count() 返回 0 */
+  codex?: CodexAccess;
 }
 
 /**
@@ -140,58 +161,84 @@ export function createProxyServer(deps: ProxyServerDeps): http.Server {
           baseHeaders['content-type'] = 'application/json';
         }
 
-        // codex:用 OAuth token 单次转发(不走 providers.json key 轮换)
+        // codex:多账号轮换(从游标起,遇 401/429/5xx 换下一个账号)
         if (target && target.preset.id === 'codex') {
-          const auth = deps.getCodexAuth ? await deps.getCodexAuth() : null;
-          if (!auth) {
+          const codex = deps.codex;
+          const n = codex ? await codex.count() : 0;
+          if (!codex || n === 0) {
             res.writeHead(401, { 'content-type': 'application/json' });
             res.end(anthropicError('authentication_error', 'codex 未登录,请在 Provider 设置中登录 ChatGPT。'));
             return;
           }
-          const codexHeaders: Record<string, any> = {
-            ...baseHeaders,
-            'authorization': `Bearer ${auth.accessToken}`,
-            'chatgpt-account-id': auth.accountId,
-            'originator': 'codex-tui',
-            'accept': 'text/event-stream',
-          };
-          try {
-            const upstream = await fetch(targetUrl, { method: 'POST', headers: codexHeaders as any, body: targetBody });
-            console.log(`[proxy] codex upstream status ${upstream.status}`);
-            if (upstream.status >= 400) {
-              const errText = await upstream.text();
-              res.writeHead(upstream.status, { 'content-type': 'application/json' });
-              res.end(anthropicError('upstream_error', errText.slice(0, 2000)));
-              return;
+          const seq = pickCodexSequence(n, codex.startIndex());
+          let lastErr: any = null;
+          for (let s = 0; s < seq.length; s++) {
+            const idx = seq[s];
+            const auth = await codex.validAt(idx);
+            if (!auth) {
+              lastErr = new Error(`codex account #${idx} unavailable`);
+              continue;
             }
-            res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
-            const parser = new SSEParser();
-            const stream = translator!.createStreamTranslator();
-            const reader = upstream.body?.getReader();
-            const decoder = new TextDecoder();
-            if (reader) {
-              while (true) {
-                const { done, value } = await reader.read();
-                if (done) {
-                  break;
-                }
-                for (const payload of parser.push(decoder.decode(value, { stream: true }))) {
-                  for (const event of stream.push(payload)) {
-                    if (!res.write(event)) {
-                      await new Promise<void>(resolve => res.once('drain', resolve));
+            const codexHeaders: Record<string, any> = {
+              ...baseHeaders,
+              'authorization': `Bearer ${auth.accessToken}`,
+              'chatgpt-account-id': auth.accountId,
+              'originator': 'codex-tui',
+              'accept': 'text/event-stream',
+            };
+            try {
+              const upstream = await fetch(targetUrl, { method: 'POST', headers: codexHeaders as any, body: targetBody });
+              console.log(`[proxy] codex upstream status ${upstream.status} (account #${idx})`);
+
+              if (shouldRotate(upstream.status) && s < seq.length - 1) {
+                console.warn(`[proxy] codex account #${idx} failed (${upstream.status}), rotating`);
+                await upstream.body?.cancel();
+                continue;
+              }
+
+              if (upstream.status >= 400) {
+                const errText = await upstream.text();
+                res.writeHead(upstream.status, { 'content-type': 'application/json' });
+                res.end(anthropicError('upstream_error', errText.slice(0, 2000)));
+                return;
+              }
+
+              codex.markSuccess(idx);
+              res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
+              const parser = new SSEParser();
+              const stream = translator!.createStreamTranslator();
+              const reader = upstream.body?.getReader();
+              const decoder = new TextDecoder();
+              if (reader) {
+                while (true) {
+                  const { done, value } = await reader.read();
+                  if (done) {
+                    break;
+                  }
+                  for (const payload of parser.push(decoder.decode(value, { stream: true }))) {
+                    for (const event of stream.push(payload)) {
+                      if (!res.write(event)) {
+                        await new Promise<void>(resolve => res.once('drain', resolve));
+                      }
                     }
                   }
                 }
               }
+              res.end();
+              return;
+            } catch (err) {
+              lastErr = err;
+              if (s < seq.length - 1) {
+                console.warn(`[proxy] codex account #${idx} network error, rotating`, err);
+                continue;
+              }
             }
-            res.end();
-            return;
-          } catch (err) {
-            console.error('[proxy] codex error:', err);
-            res.writeHead(500, { 'content-type': 'application/json' });
-            res.end(anthropicError('api_error', String((err as any)?.message ?? err)));
-            return;
           }
+
+          console.error('[proxy] codex all accounts failed:', lastErr);
+          res.writeHead(500, { 'content-type': 'application/json' });
+          res.end(anthropicError('api_error', String(lastErr?.message ?? lastErr)));
+          return;
         }
 
         const tryKeys = apiKeys.length > 0 ? apiKeys : [null];

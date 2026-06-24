@@ -104,7 +104,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // 启动代理 server:固定起始端口(claudeProxy.port,默认 4001),被占则递增找可用
   // —— 单项目稳定用起始端口;同机多项目窗口并行时各自往后挑,互不冲突。实际端口回填到项目 settings.json。
-  server = createProxyServer({ getConfig, getCodexAuth: () => codexAuth.validAt(0) });
+  server = createProxyServer({
+      getConfig,
+      codex: {
+        count: () => codexAuth.count(),
+        startIndex: () => codexAuth.startIndex(),
+        validAt: (i) => codexAuth.validAt(i),
+        markSuccess: (i) => codexAuth.markSuccess(i),
+      },
+    });
   const startPort = configuredPort();
   currentPort = startPort;
   let portRetries = 0;
