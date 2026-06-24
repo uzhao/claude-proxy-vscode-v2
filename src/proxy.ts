@@ -35,7 +35,7 @@ export function resolveTarget(cfg: ProxyConfig): Target | null {
   }
   const entry = getProvider(cfg, name);
   const apiKeys = entry?.apiKeys ?? [];
-  // codex 用 OAuth 登录,不需要 providers.json 中的 key;其余 provider 必须至少有一个 key
+  // codex 用 OAuth 登录、自定义 provider 可 keyless(由 baseUrl 直接转发);其余 provider 必须至少有一个 key
   if (preset.id !== 'codex' && !preset.custom && apiKeys.length === 0) {
     return null;
   }
