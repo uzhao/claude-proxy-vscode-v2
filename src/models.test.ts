@@ -105,3 +105,39 @@ test('getCatalog 拉取失败抛错', async () => {
   const fakeFetch = (async () => ({ ok: false, status: 500 })) as unknown as typeof fetch;
   await assert.rejects(() => getCatalog(cache, fakeFetch), /500/);
 });
+
+import { parseEndpointModels, fetchEndpointModels } from './models';
+
+test('parseEndpointModels 解析 data[].id 并按 id 升序', () => {
+  const json = { data: [{ id: 'qwen2.5' }, { id: 'llama3.2' }] };
+  assert.deepEqual(parseEndpointModels(json).map(m => m.id), ['llama3.2', 'qwen2.5']);
+});
+
+test('parseEndpointModels name=id 且 releaseDate 为空', () => {
+  assert.deepEqual(parseEndpointModels({ data: [{ id: 'llama3.2' }] })[0], { id: 'llama3.2', name: 'llama3.2', releaseDate: '' });
+});
+
+test('parseEndpointModels 非数组/缺字段降级', () => {
+  assert.deepEqual(parseEndpointModels({}), []);
+  assert.deepEqual(parseEndpointModels({ data: 'x' }), []);
+  assert.deepEqual(parseEndpointModels({ data: [{ foo: 1 }, { id: 'ok' }] }).map(m => m.id), ['ok']);
+});
+
+test('fetchEndpointModels 带 key 时加 Bearer 并拼对 URL', async () => {
+  let seenUrl = '';
+  let seenAuth: any = '';
+  const fakeFetch = (async (url: string, init: any) => {
+    seenUrl = url;
+    seenAuth = init?.headers?.Authorization;
+    return { ok: true, json: async () => ({ data: [{ id: 'llama3.2' }] }) };
+  }) as unknown as typeof fetch;
+  const models = await fetchEndpointModels('http://localhost:11434', 'sk-x', fakeFetch);
+  assert.equal(seenUrl, 'http://localhost:11434/v1/models');
+  assert.equal(seenAuth, 'Bearer sk-x');
+  assert.deepEqual(models.map(m => m.id), ['llama3.2']);
+});
+
+test('fetchEndpointModels 非 2xx 抛错', async () => {
+  const fakeFetch = (async () => ({ ok: false, status: 404 })) as unknown as typeof fetch;
+  await assert.rejects(() => fetchEndpointModels('http://x', undefined, fakeFetch), /404/);
+});

@@ -1,5 +1,7 @@
 // 内置 provider preset 目录(Part 1)。codex 仅作占位,登录留待 Part 3。
 
+import { CustomProvider, ProxyConfig } from './config';
+
 export type ProviderFormat = 'anthropic' | 'openai';
 
 export interface Preset {
@@ -14,6 +16,8 @@ export interface Preset {
   forwardable: boolean;
   /** 走 OpenAI Chat Completions('chat')还是 Responses API('responses');非 openai 格式无意义 */
   api: 'chat' | 'responses';
+  /** 用户自定义 provider(来自 CustomProvider),区别于内置 PRESETS */
+  custom?: boolean;
 }
 
 /** Codex 占位 id —— Part 1 仅在管理列表展示提示,不落地登录/转发 */
@@ -32,4 +36,19 @@ export const PRESETS: Preset[] = [
 
 export function getPreset(id: string): Preset | undefined {
   return PRESETS.find(p => p.id === id);
+}
+
+/** 把自定义 provider 派生成内置 Preset 同形:固定 openai / chat / 可转发 */
+export function customToPreset(cp: CustomProvider): Preset {
+  return { id: cp.id, format: 'openai', baseUrl: cp.baseUrl, modelsDevId: '', forwardable: true, api: 'chat', custom: true };
+}
+
+/** 合并查找:先内置 PRESETS,再 cfg.customProviders(内置优先) */
+export function resolvePreset(cfg: ProxyConfig, name: string): Preset | undefined {
+  const builtin = getPreset(name);
+  if (builtin) {
+    return builtin;
+  }
+  const cp = (cfg.customProviders ?? []).find(c => c.id === name);
+  return cp ? customToPreset(cp) : undefined;
 }

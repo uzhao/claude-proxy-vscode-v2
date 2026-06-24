@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as http from 'http';
 import * as path from 'path';
-import { ProxyConfig } from './config';
+import { ProxyConfig, CustomProvider } from './config';
 import { ProviderKeyStore, ProviderKeys } from './providerKeys';
 import { getCatalog, CatalogCache } from './models';
 import { createProxyServer } from './proxy';
@@ -46,6 +46,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   const MODELS_CACHE_KEY = 'claudeProxy.modelsCache';
   const MODELS_CACHE_TTL = 24 * 60 * 60 * 1000;
+  const CUSTOM_PROVIDERS_KEY = 'claudeProxy.customProviders';
 
   // provider key:从 SecretStorage 读入内存(首启迁移旧 providers.json)
   const keyStore = new ProviderKeyStore(context.secrets);
@@ -69,6 +70,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const getConfig = (): ProxyConfig => ({
     mapping: context.workspaceState.get<string>(MAPPING_KEY, 'pass'),
     providers: Object.entries(providerKeys).map(([name, apiKeys]) => ({ name, apiKeys })),
+    customProviders: context.globalState.get<CustomProvider[]>(CUSTOM_PROVIDERS_KEY, []),
   });
 
   // applyConfig:providers 更新内存 + 写 SecretStorage;mapping 写 workspaceState;同步代理 + 刷新;翻转才 reload
@@ -76,6 +78,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     providerKeys = Object.fromEntries(cfg.providers.map(p => [p.name, p.apiKeys]));
     await keyStore.save(providerKeys);
     await context.workspaceState.update(MAPPING_KEY, cfg.mapping);
+    await context.globalState.update(CUSTOM_PROVIDERS_KEY, cfg.customProviders ?? []);
     const flipped = syncProxy(cfg);
     statusBar.refresh();
     if (flipped) {

@@ -1,6 +1,6 @@
 import * as http from 'http';
 import { ProxyConfig, getProvider } from './config';
-import { getPreset, Preset } from './presets';
+import { resolvePreset, Preset } from './presets';
 import { getTranslator } from './translate/registry';
 import { SSEParser } from './translate/sse';
 
@@ -29,14 +29,14 @@ export function resolveTarget(cfg: ProxyConfig): Target | null {
   if (!model) {
     return null;
   }
-  const preset = getPreset(name);
+  const preset = resolvePreset(cfg, name);
   if (!preset) {
     return null;
   }
   const entry = getProvider(cfg, name);
   const apiKeys = entry?.apiKeys ?? [];
-  // codex 用 OAuth 登录,不需要 providers.json 中的 key;其余 provider 必须至少有一个 key
-  if (preset.id !== 'codex' && apiKeys.length === 0) {
+  // codex 用 OAuth 登录、自定义 provider 可 keyless(由 baseUrl 直接转发);其余 provider 必须至少有一个 key
+  if (preset.id !== 'codex' && !preset.custom && apiKeys.length === 0) {
     return null;
   }
   return { preset, model, apiKeys, forwardable: preset.forwardable };

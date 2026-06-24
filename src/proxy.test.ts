@@ -53,3 +53,25 @@ test('shouldRotate 仅对 401/429/5xx 为真', () => {
   assert.equal(shouldRotate(500), true);
   assert.equal(shouldRotate(503), true);
 });
+
+test('自定义 provider 无 key 仍命中 target(keyless)', () => {
+  const cfg: ProxyConfig = {
+    mapping: 'ollama:llama3.2', providers: [],
+    customProviders: [{ id: 'ollama', baseUrl: 'http://localhost:11434' }],
+  };
+  const t = resolveTarget(cfg)!;
+  assert.equal(t.preset.id, 'ollama');
+  assert.equal(t.preset.custom, true);
+  assert.equal(t.model, 'llama3.2');
+  assert.deepEqual(t.apiKeys, []);
+  assert.equal(t.forwardable, true);
+});
+
+test('自定义 provider 有 key 时带上 key', () => {
+  const cfg: ProxyConfig = {
+    mapping: 'ollama:llama3.2',
+    providers: [{ name: 'ollama', apiKeys: ['sk-x'] }],
+    customProviders: [{ id: 'ollama', baseUrl: 'http://localhost:11434' }],
+  };
+  assert.deepEqual(resolveTarget(cfg)!.apiKeys, ['sk-x']);
+});
