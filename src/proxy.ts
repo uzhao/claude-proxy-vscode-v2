@@ -3,6 +3,7 @@ import { ProxyConfig, getProvider } from './config';
 import { resolvePreset, Preset } from './presets';
 import { getTranslator } from './translate/registry';
 import { SSEParser } from './translate/sse';
+import { planOpenAIRequest, extractResponsesUsage, OpenAIPlan, Pool, OpenAIOfficialSettings } from './openai/freeTokens';
 
 export interface Target {
   preset: Preset;
@@ -73,11 +74,20 @@ export interface CodexAccess {
   markSuccess(i: number): void;
 }
 
+/** openai 官方免费额度访问:读设置 / 读当日用量 / 累加用量 */
+export interface OpenAIAccess {
+  settings(): OpenAIOfficialSettings;
+  used(p: Pool): number;
+  add(p: Pool, tokens: number): void;
+}
+
 export interface ProxyServerDeps {
   /** 读取当前配置(每次请求实时读,保证热更新) */
   getConfig: () => ProxyConfig;
   /** codex 多账号凭证访问;未登录时 count() 返回 0 */
   codex?: CodexAccess;
+  /** openai 官方免费额度访问;未注入则不做额度限制 */
+  openai?: OpenAIAccess;
 }
 
 /**
@@ -125,6 +135,8 @@ export function createProxyServer(deps: ProxyServerDeps): http.Server {
         let targetUrl = `https://api.anthropic.com${req.url}`;
         let targetBody = body;
         let apiKeys: string[] = [];
+        // openai 流式 usage 回写时需要知道命中了哪个计量池
+        let openaiPool: Pool | null = null;
 
         if (target) {
           apiKeys = target.apiKeys;
@@ -132,6 +144,25 @@ export function createProxyServer(deps: ProxyServerDeps): http.Server {
             // 格式转换路径(openai 系):换端点 + 请求体转换
             targetUrl = `${target.preset.baseUrl}${translator.endpointPath}`;
             const upstreamBody = translator.buildRequest(requestBody ?? {}, target.model);
+            // openai 官方:免费额度决策(停用 / flex 注入 / 计量池)
+            if (target.preset.id === 'openai' && deps.openai) {
+              const plan: OpenAIPlan = planOpenAIRequest(
+                target.model, deps.openai.settings(), (p) => deps.openai!.used(p),
+              );
+              if (!plan.allowed) {
+                const msg = plan.pool
+                  ? `OpenAI daily free quota exhausted (${plan.pool} pool), resets at UTC 00:00.`
+                  : `Model "${target.model}" is not eligible for OpenAI free quota.`;
+                console.warn(`[proxy] openai blocked: ${msg}`);
+                res.writeHead(429, { 'content-type': 'application/json' });
+                res.end(anthropicError('rate_limit_error', msg));
+                return;
+              }
+              openaiPool = plan.pool;
+              if (plan.flex) {
+                (upstreamBody as any).service_tier = 'flex';
+              }
+            }
             targetBody = Buffer.from(JSON.stringify(upstreamBody), 'utf8');
           } else {
             // 原样转发路径(anthropic 系):仅换 baseUrl/model
@@ -288,6 +319,13 @@ export function createProxyServer(deps: ProxyServerDeps): http.Server {
                     break;
                   }
                   for (const payload of parser.push(decoder.decode(value, { stream: true }))) {
+                    // openai 官方:从流式响应中提取 usage 并回写当日用量
+                    if (openaiPool && deps.openai) {
+                      const u = extractResponsesUsage(payload);
+                      if (u != null) {
+                        deps.openai.add(openaiPool, u);
+                      }
+                    }
                     for (const event of stream.push(payload)) {
                       if (!res.write(event)) {
                         await new Promise<void>(resolve => res.once('drain', resolve));
