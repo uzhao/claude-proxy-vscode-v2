@@ -49,7 +49,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   console.log('Claude Proxy activating...');
 
   const MODELS_CACHE_KEY = 'claudeProxy.modelsCache';
-  const MODELS_CACHE_TTL = 24 * 60 * 60 * 1000;
+  const MODELS_CACHE_TTL = 30 * 60 * 1000;
   const CUSTOM_PROVIDERS_KEY = 'claudeProxy.customProviders';
 
   // provider key:从 SecretStorage 读入内存(首启迁移旧 providers.json)
