@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseCodexQuota, formatCodexQuotaSummary } from './quota';
+import { fetchCodexQuota } from './quota';
 
 // 固定 now,用于 reset_after_seconds 路径的确定性断言
 // 2026-07-08 12:00:00 本地时间的近似;测试只比较相对结果与格式,不硬编码时区
@@ -122,4 +123,47 @@ test('formatCodexQuotaSummary: 百分比四舍五入', () => {
     resetLabel: '-',
   });
   assert.equal(line, '5h 41% · 周 12%');
+});
+
+function mockFetch(status: number, body: unknown): typeof fetch {
+  return (async (_url: string, init?: any) => ({
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => body,
+    text: async () => (typeof body === 'string' ? body : JSON.stringify(body)),
+    // 供断言 header
+    _init: init,
+  })) as unknown as typeof fetch;
+}
+
+test('fetchCodexQuota: 2xx 返回解析后的 payload,并带正确请求头', async () => {
+  let seenInit: any;
+  const fetcher = (async (_url: string, init?: any) => {
+    seenInit = init;
+    return { ok: true, status: 200, json: async () => ({ plan_type: 'plus' }), text: async () => '' };
+  }) as unknown as typeof fetch;
+
+  const payload = await fetchCodexQuota('tok-abc', 'acc-123', fetcher);
+  assert.equal(payload.plan_type, 'plus');
+  assert.equal(seenInit.method, 'GET');
+  assert.equal(seenInit.headers['Authorization'], 'Bearer tok-abc');
+  assert.equal(seenInit.headers['Chatgpt-Account-Id'], 'acc-123');
+});
+
+test('fetchCodexQuota: accountId 为空时不带 Chatgpt-Account-Id 头', async () => {
+  let seenInit: any;
+  const fetcher = (async (_url: string, init?: any) => {
+    seenInit = init;
+    return { ok: true, status: 200, json: async () => ({}), text: async () => '' };
+  }) as unknown as typeof fetch;
+
+  await fetchCodexQuota('tok', '', fetcher);
+  assert.equal('Chatgpt-Account-Id' in seenInit.headers, false);
+});
+
+test('fetchCodexQuota: 非 2xx 抛错且带 status', async () => {
+  await assert.rejects(
+    () => fetchCodexQuota('tok', 'acc', mockFetch(401, 'unauthorized')),
+    (err: any) => err.status === 401,
+  );
 });

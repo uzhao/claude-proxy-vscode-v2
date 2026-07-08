@@ -32,6 +32,10 @@ export interface CodexQuotaSummary {
   resetLabel: string;
 }
 
+export const CODEX_USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage';
+
+const CODEX_USER_AGENT = 'codex_cli_rs/0.76.0 (Debian 13.0.0; x86_64) WindowsTerminal';
+
 const FIVE_HOUR_SECONDS = 18000;
 const WEEK_SECONDS = 604800;
 const MIN_MONTH_SECONDS = 28 * 24 * 60 * 60; // 2419200
@@ -163,4 +167,27 @@ export function formatCodexQuotaSummary(s: CodexQuotaSummary): string {
     parts.push(`重置 ${s.resetLabel}`);
   }
   return parts.join(' · ');
+}
+
+export async function fetchCodexQuota(
+  accessToken: string,
+  accountId: string,
+  fetcher: typeof fetch = fetch,
+): Promise<CodexUsagePayload> {
+  const headers: Record<string, string> = {
+    'Authorization': `Bearer ${accessToken}`,
+    'Content-Type': 'application/json',
+    'User-Agent': CODEX_USER_AGENT,
+  };
+  if (accountId) {
+    headers['Chatgpt-Account-Id'] = accountId;
+  }
+  const res = await fetcher(CODEX_USAGE_URL, { method: 'GET', headers } as any);
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    const err = new Error(`codex usage request failed: ${res.status} ${text}`) as Error & { status?: number };
+    err.status = res.status;
+    throw err;
+  }
+  return (await res.json()) as CodexUsagePayload;
 }
