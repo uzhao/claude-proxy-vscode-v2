@@ -4,6 +4,7 @@ import { PRESETS, CODEX_PLACEHOLDER_ID, resolvePreset } from './presets';
 import { parseProviderModels, filterFeatured, fetchEndpointModels, ModelInfo } from './models';
 import { CodexAuth } from './codex/auth';
 import { OpenAIOfficialSettings, DEFAULT_OPENAI_SETTINGS, OPENAI_SETTINGS_KEY } from './openai/freeTokens';
+import { fetchCodexQuota, parseCodexQuota, formatCodexQuotaSummary } from './codex/quota';
 
 const MRU_KEY = 'claudeProxy.recentMappings';
 const MRU_MAX = 5;
@@ -223,9 +224,18 @@ export class StatusBar {
   private async manageCodex(): Promise<void> {
     type CItem = vscode.QuickPickItem & { accountId?: string; login?: boolean; import?: boolean };
     const accounts = await this.deps.codexAuth.list();
-    const items: CItem[] = accounts.map(a => ({
+
+    // 并行拉取各账号 quota(每个 4s 超时,失败不阻塞菜单),显示在 description 行
+    const descriptions = accounts.length
+      ? await vscode.window.withProgress(
+          { location: vscode.ProgressLocation.Notification, title: '获取 codex quota…' },
+          () => Promise.all(accounts.map((_, i) => this.codexQuotaDescription(i))),
+        )
+      : [];
+
+    const items: CItem[] = accounts.map((a, i) => ({
       label: `$(account) ${a.email || a.accountId || '(unknown)'}`,
-      description: '点击登出此账号',
+      description: descriptions[i],
       accountId: a.accountId,
     }));
     if (accounts.length > 0) {
@@ -252,6 +262,20 @@ export class StatusBar {
       if (confirm === '登出') {
         await vscode.commands.executeCommand('claudeProxy.codexLogout', picked.accountId);
       }
+    }
+  }
+
+  /** 取第 i 个账号的 quota 摘要文案;任何失败(未登录/网络/超时)返回提示文案 */
+  private async codexQuotaDescription(index: number): Promise<string> {
+    try {
+      const cred = await this.deps.codexAuth.validAt(index);
+      if (!cred) {
+        return 'quota 获取失败';
+      }
+      const payload = await withTimeout(fetchCodexQuota(cred.accessToken, cred.accountId), 4000);
+      return formatCodexQuotaSummary(parseCodexQuota(payload));
+    } catch {
+      return 'quota 获取失败';
     }
   }
 
@@ -425,4 +449,11 @@ function mask(k: string): string {
     return '****';
   }
   return `${k.slice(0, 4)}…${k.slice(-4)}`;
+}
+
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
+  ]);
 }
