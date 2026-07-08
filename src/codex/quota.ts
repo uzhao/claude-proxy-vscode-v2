@@ -149,3 +149,18 @@ export function parseCodexQuota(
     resetLabel,
   };
 }
+
+export function formatCodexQuotaSummary(s: CodexQuotaSummary): string {
+  const parts: string[] = [];
+  if (s.planType) {
+    parts.push(s.planType.charAt(0).toUpperCase() + s.planType.slice(1));
+  }
+  const pct = (v: number | null) => (v === null ? '-' : `${Math.round(v)}%`);
+  parts.push(`5h ${pct(s.primaryPercent)}`);
+  const secLabel = s.secondaryKind === 'month' ? '月' : '周';
+  parts.push(`${secLabel} ${pct(s.secondaryPercent)}`);
+  if (s.resetLabel && s.resetLabel !== '-') {
+    parts.push(`重置 ${s.resetLabel}`);
+  }
+  return parts.join(' · ');
+}

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseCodexQuota } from './quota';
+import { parseCodexQuota, formatCodexQuotaSummary } from './quota';
 
 // 固定 now,用于 reset_after_seconds 路径的确定性断言
 // 2026-07-08 12:00:00 本地时间的近似;测试只比较相对结果与格式,不硬编码时区
@@ -78,4 +78,48 @@ test('parseCodexQuota: 空 payload 返回全兜底', () => {
   assert.equal(s.secondaryPercent, null);
   assert.equal(s.secondaryKind, null);
   assert.equal(s.resetLabel, '-');
+});
+
+test('formatCodexQuotaSummary: 完整字段拼成一行', () => {
+  const line = formatCodexQuotaSummary({
+    planType: 'plus',
+    primaryPercent: 40,
+    secondaryPercent: 12,
+    secondaryKind: 'week',
+    resetLabel: '07-08 14:30',
+  });
+  assert.equal(line, 'Plus · 5h 40% · 周 12% · 重置 07-08 14:30');
+});
+
+test('formatCodexQuotaSummary: 月度次窗口用「月」', () => {
+  const line = formatCodexQuotaSummary({
+    planType: 'team',
+    primaryPercent: 5,
+    secondaryPercent: 60,
+    secondaryKind: 'month',
+    resetLabel: '-',
+  });
+  assert.equal(line, 'Team · 5h 5% · 月 60%');
+});
+
+test('formatCodexQuotaSummary: 缺字段兜底(无 plan、百分比为 null、无重置)', () => {
+  const line = formatCodexQuotaSummary({
+    planType: null,
+    primaryPercent: null,
+    secondaryPercent: null,
+    secondaryKind: null,
+    resetLabel: '-',
+  });
+  assert.equal(line, '5h - · 周 -');
+});
+
+test('formatCodexQuotaSummary: 百分比四舍五入', () => {
+  const line = formatCodexQuotaSummary({
+    planType: null,
+    primaryPercent: 40.6,
+    secondaryPercent: 12.2,
+    secondaryKind: 'week',
+    resetLabel: '-',
+  });
+  assert.equal(line, '5h 41% · 周 12%');
 });
