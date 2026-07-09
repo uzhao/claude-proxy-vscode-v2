@@ -1,7 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseCodexQuota, formatCodexQuotaSummary } from './quota';
-import { fetchCodexQuota } from './quota';
+import { parseCodexQuota, formatCodexQuotaSummary, fetchCodexQuota, CODEX_USAGE_URL } from './quota';
 
 // 固定 now,用于 reset_after_seconds 路径的确定性断言
 // 2026-07-08 12:00:00 本地时间的近似;测试只比较相对结果与格式,不硬编码时区
@@ -138,7 +137,9 @@ function mockFetch(status: number, body: unknown): typeof fetch {
 
 test('fetchCodexQuota: 2xx 返回解析后的 payload,并带正确请求头', async () => {
   let seenInit: any;
-  const fetcher = (async (_url: string, init?: any) => {
+  let seenUrl: any;
+  const fetcher = (async (url: string, init?: any) => {
+    seenUrl = url;
     seenInit = init;
     return { ok: true, status: 200, json: async () => ({ plan_type: 'plus' }), text: async () => '' };
   }) as unknown as typeof fetch;
@@ -148,6 +149,8 @@ test('fetchCodexQuota: 2xx 返回解析后的 payload,并带正确请求头', as
   assert.equal(seenInit.method, 'GET');
   assert.equal(seenInit.headers['Authorization'], 'Bearer tok-abc');
   assert.equal(seenInit.headers['Chatgpt-Account-Id'], 'acc-123');
+  assert.equal(seenUrl, CODEX_USAGE_URL);
+  assert.equal(seenInit.headers['User-Agent'], 'codex_cli_rs/0.76.0 (Debian 13.0.0; x86_64) WindowsTerminal');
 });
 
 test('fetchCodexQuota: accountId 为空时不带 Chatgpt-Account-Id 头', async () => {
@@ -166,4 +169,34 @@ test('fetchCodexQuota: 非 2xx 抛错且带 status', async () => {
     () => fetchCodexQuota('tok', 'acc', mockFetch(401, 'unauthorized')),
     (err: any) => err.status === 401,
   );
+});
+
+test('parseCodexQuota: resetLabel 取更早窗口并格式化 (reset_after_seconds 路径)', () => {
+  const now = Date.UTC(2026, 6, 8, 4, 0, 0);
+  const payload = {
+    rate_limit: {
+      primary_window: { used_percent: 1, limit_window_seconds: 18000, reset_after_seconds: 7200 },   // +2h
+      secondary_window: { used_percent: 1, limit_window_seconds: 604800, reset_after_seconds: 3600 }, // +1h,更早
+    },
+  };
+  const s = parseCodexQuota(payload, now);
+  const d = new Date(Math.floor(now / 1000 + 3600) * 1000);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const expected = `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  assert.equal(s.resetLabel, expected);
+});
+
+test('parseCodexQuota: resetLabel 走 reset_at 路径并格式化', () => {
+  const resetAt = 1752480000; // 固定 unix 秒
+  const payload = {
+    rate_limit: {
+      primary_window: { used_percent: 1, limit_window_seconds: 18000, reset_at: resetAt + 10000 },
+      secondary_window: { used_percent: 1, limit_window_seconds: 604800, reset_at: resetAt }, // 更早
+    },
+  };
+  const s = parseCodexQuota(payload, Date.UTC(2026, 6, 8, 4, 0, 0));
+  const d = new Date(resetAt * 1000);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const expected = `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  assert.equal(s.resetLabel, expected);
 });

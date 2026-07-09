@@ -1,4 +1,5 @@
 // 官方 usage 接口 payload 的宽松类型(兼容 snake_case 与 camelCase)
+/** 单个用量窗口(5h/周/月)的原始字段 */
 export interface CodexUsageWindow {
   used_percent?: number | string;
   usedPercent?: number | string;
@@ -10,6 +11,7 @@ export interface CodexUsageWindow {
   resetAt?: number | string;
 }
 
+/** primary/secondary 两个限流窗口的容器 */
 export interface CodexRateLimitInfo {
   primary_window?: CodexUsageWindow | null;
   primaryWindow?: CodexUsageWindow | null;
@@ -17,6 +19,7 @@ export interface CodexRateLimitInfo {
   secondaryWindow?: CodexUsageWindow | null;
 }
 
+/** 官方 usage 接口返回体(兼容 snake_case 与 camelCase) */
 export interface CodexUsagePayload {
   plan_type?: string;
   planType?: string;
@@ -24,6 +27,7 @@ export interface CodexUsagePayload {
   rateLimit?: CodexRateLimitInfo | null;
 }
 
+/** quota 摘要:供账号菜单一行展示 */
 export interface CodexQuotaSummary {
   planType: string | null;
   primaryPercent: number | null;
@@ -32,6 +36,7 @@ export interface CodexQuotaSummary {
   resetLabel: string;
 }
 
+/** codex 官方用量接口 */
 export const CODEX_USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage';
 
 const CODEX_USER_AGENT = 'codex_cli_rs/0.76.0 (Debian 13.0.0; x86_64) WindowsTerminal';
@@ -86,6 +91,7 @@ function formatUnixSeconds(sec: number): string {
   return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+/** 解析 usage payload → quota 摘要;分类 5h/周/月窗口,取更早的重置时间 */
 export function parseCodexQuota(
   payload: CodexUsagePayload | null | undefined,
   nowMs: number = Date.now(),
@@ -154,6 +160,7 @@ export function parseCodexQuota(
   };
 }
 
+/** 把 quota 摘要拼成一行中文 description */
 export function formatCodexQuotaSummary(s: CodexQuotaSummary): string {
   const parts: string[] = [];
   if (s.planType) {
@@ -169,6 +176,7 @@ export function formatCodexQuotaSummary(s: CodexQuotaSummary): string {
   return parts.join(' · ');
 }
 
+/** GET 官方 usage 接口;非 2xx 抛带 status 的错误 */
 export async function fetchCodexQuota(
   accessToken: string,
   accountId: string,

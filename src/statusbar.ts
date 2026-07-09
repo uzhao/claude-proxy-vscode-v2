@@ -225,11 +225,18 @@ export class StatusBar {
     type CItem = vscode.QuickPickItem & { accountId?: string; login?: boolean; import?: boolean };
     const accounts = await this.deps.codexAuth.list();
 
-    // 并行拉取各账号 quota(每个 4s 超时,失败不阻塞菜单),显示在 description 行
-    const descriptions = accounts.length
+    // 串行拉取各账号 quota(每个 4s 超时,失败不阻塞菜单),显示在 description 行
+    const descriptions: string[] = accounts.length
       ? await vscode.window.withProgress(
           { location: vscode.ProgressLocation.Notification, title: '获取 codex quota…' },
-          () => Promise.all(accounts.map((_, i) => this.codexQuotaDescription(i))),
+          async () => {
+            const out: string[] = [];
+            // 串行拉取:与 proxy.ts 的 validAt 用法一致,避免并发刷新 token 写回竞争
+            for (let i = 0; i < accounts.length; i++) {
+              out.push(await this.codexQuotaDescription(i));
+            }
+            return out;
+          },
         )
       : [];
 
@@ -452,8 +459,9 @@ function mask(k: string): string {
 }
 
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
-  return Promise.race([
-    p,
-    new Promise<T>((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
-  ]);
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<T>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('timeout')), ms);
+  });
+  return Promise.race([p, timeout]).finally(() => clearTimeout(timer));
 }
