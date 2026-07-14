@@ -25,6 +25,7 @@ export const CODEX_PLACEHOLDER_ID = 'codex';
 
 export const PRESETS: Preset[] = [
   { id: 'openai',     format: 'openai',    baseUrl: 'https://api.openai.com',                     modelsDevId: 'openai',     forwardable: true,  api: 'responses' },
+  { id: 'meta',       format: 'openai',    baseUrl: 'https://api.meta.ai',                        modelsDevId: 'meta',       forwardable: true,  api: 'chat' },
   { id: 'openrouter', format: 'openai',    baseUrl: 'https://openrouter.ai/api',                  modelsDevId: 'openrouter', forwardable: true,  api: 'chat' },
   { id: 'nvidia',     format: 'openai',    baseUrl: 'https://integrate.api.nvidia.com',           modelsDevId: 'nvidia',     forwardable: true,  api: 'chat' },
   { id: 'glm',        format: 'anthropic', baseUrl: 'https://open.bigmodel.cn/api/anthropic',     modelsDevId: 'zhipuai',    forwardable: true,  api: 'chat' },

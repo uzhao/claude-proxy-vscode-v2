@@ -56,6 +56,27 @@ test('isFeatured:未命中返回 false', () => {
   assert.equal(isFeatured('deepseek-v3'), false);
 });
 
+test('isFeatured:claude 4/5 两代均命中', () => {
+  assert.equal(isFeatured('claude-opus-4-8'), true);
+  assert.equal(isFeatured('claude-haiku-4-5-20251001'), true);
+  assert.equal(isFeatured('claude-sonnet-5'), true);
+  assert.equal(isFeatured('claude-fable-5'), true);
+});
+
+test('isFeatured:gpt 只认 gpt-5 系,不误收带 5 的老模型', () => {
+  assert.equal(isFeatured('gpt-5.6'), true);
+  assert.equal(isFeatured('gpt-5.3-codex'), true);
+  assert.equal(isFeatured('gpt-3.5-turbo'), false);
+  assert.equal(isFeatured('gpt-4o-2024-05-13'), false);
+  assert.equal(isFeatured('gpt-image-1.5'), false);
+});
+
+test('isFeatured:meta muse-spark(含中转站的 vendor 前缀形式)', () => {
+  assert.equal(isFeatured('muse-spark-1.1'), true);
+  assert.equal(isFeatured('meta/muse-spark-1.1'), true);
+  assert.equal(isFeatured('muse-spark-2'), true);
+});
+
 test('isFeatured:忽略 vendor 前缀,只匹配 / 后的模型名', () => {
   assert.equal(isFeatured('z-ai/glm-5.1'), true);
   assert.equal(isFeatured('moonshotai/kimi-k2.6'), true);

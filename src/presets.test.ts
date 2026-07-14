@@ -3,11 +3,20 @@ import assert from 'node:assert/strict';
 import { PRESETS, getPreset, CODEX_PLACEHOLDER_ID, customToPreset, resolvePreset } from './presets';
 import { ProxyConfig } from './config';
 
-test('包含 8 个可配置 preset,codex 已成为正式 preset', () => {
+test('包含 9 个可配置 preset,codex 已成为正式 preset', () => {
   const ids = PRESETS.map(p => p.id);
-  assert.deepEqual(ids, ['openai', 'openrouter', 'nvidia', 'glm', 'kimi', 'deepseek', 'minimax', 'codex']);
+  assert.deepEqual(ids, ['openai', 'meta', 'openrouter', 'nvidia', 'glm', 'kimi', 'deepseek', 'minimax', 'codex']);
   // codex 已升格为正式 preset,CODEX_PLACEHOLDER_ID 仅保留常量供外部引用
   assert.equal(getPreset(CODEX_PLACEHOLDER_ID)?.id, 'codex');
+});
+
+test('meta 为 openai/chat 格式,baseUrl 不含 /v1(由 translator 拼 endpointPath)', () => {
+  const p = getPreset('meta')!;
+  assert.equal(p.format, 'openai');
+  assert.equal(p.api, 'chat');
+  assert.equal(p.baseUrl, 'https://api.meta.ai');
+  assert.equal(p.modelsDevId, 'meta');
+  assert.equal(p.forwardable, true);
 });
 
 test('国产四家为 anthropic 格式且 forwardable', () => {

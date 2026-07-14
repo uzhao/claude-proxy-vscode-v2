@@ -23,8 +23,8 @@ export function parseProviderModels(catalog: any, modelsDevId: string): ModelInf
 
 /** 默认展示的 model 白名单(glob:* 匹配任意串,. 匹配任意单字符,大小写不敏感) */
 const FEATURED_PATTERNS = [
-  'claude*4*', 'gpt*5*', 'gemini*3*', 'kimi-k2.*',
-  'glm-5*', 'deepseek-v4*', 'minimax-m3*', 'minimax-m2.*',
+  'claude*4*', 'claude*5*', 'gpt-5*', 'gemini*3*', 'kimi-k2.*',
+  'glm-5*', 'deepseek-v4*', 'minimax-m3*', 'minimax-m2.*', 'muse-spark*',
 ];
 
 function globToRegExp(pattern: string): RegExp {
