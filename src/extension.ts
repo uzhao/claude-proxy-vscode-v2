@@ -5,6 +5,7 @@ import { ProxyConfig, CustomProvider } from './config';
 import { ProviderKeyStore, ProviderKeys } from './providerKeys';
 import { getCatalog, CatalogCache } from './models';
 import { createProxyServer } from './proxy';
+import { createFileLogger, defaultLogDir, nullLogger, Logger } from './reqlog';
 import { StatusBar } from './statusbar';
 import { GLOBAL_SETTINGS_PATH, clearProxy, setProxy, getProxy } from './claudeSettings';
 import { CodexAuth, parseImportedCredential } from './codex/auth';
@@ -23,6 +24,19 @@ const MAPPING_KEY = 'claudeProxy.mapping';
 function configuredPort(): number {
   const p = vscode.workspace.getConfiguration('claudeProxy').get<number>('port', 4001);
   return typeof p === 'number' && p > 0 && p < 65536 ? p : 4001;
+}
+
+/**
+ * 按 claudeProxy.debugLog 决定是否落请求日志。
+ * 开启时每个代理请求在临时目录写一个 jsonl,含完整请求/上游请求/上游原始 SSE/回写事件。
+ */
+function configuredLogger(): Logger {
+  if (!vscode.workspace.getConfiguration('claudeProxy').get<boolean>('debugLog', false)) {
+    return nullLogger;
+  }
+  const dir = defaultLogDir();
+  console.log(`proxy request logging enabled → ${dir}`);
+  return createFileLogger(dir);
 }
 
 function workspaceSettingsPath(): string {
@@ -150,6 +164,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // —— 单项目稳定用起始端口;同机多项目窗口并行时各自往后挑,互不冲突。实际端口回填到项目 settings.json。
   server = createProxyServer({
       getConfig,
+      log: configuredLogger(),
       codex: {
         count: () => codexAuth.count(),
         startIndex: () => codexAuth.startIndex(),

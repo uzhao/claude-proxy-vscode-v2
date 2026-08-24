@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as http from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { createProxyServer } from './proxy';
+import { createProxyServer, createIdlePing } from './proxy';
 import { ProxyConfig } from './config';
 
 /** 一直静默、永不结束的上游 Response */
@@ -102,4 +102,44 @@ test('openai 格式转换路径:上游静默时代理周期性发送 ping 保活
     await handle.dispose();
     mock.restore();
   }
+});
+
+test('createIdlePing.touch() 真正重置空闲计时:持续 touch 时不发 ping', async () => {
+  const writes: string[] = [];
+  // 只需要 write / writableEnded / writable / on 这几样,不起真 server
+  const fakeRes = {
+    writableEnded: false,
+    writable: true,
+    write: (s: string) => { writes.push(s); return true; },
+    on: () => {},
+  } as unknown as http.ServerResponse;
+
+  const ping = createIdlePing(fakeRes, 60);
+  ping.touch();
+  // 每 15ms touch 一次、持续 ~150ms:空闲间隔从未超过 60ms,不该发出任何 ping
+  for (let i = 0; i < 10; i++) {
+    await new Promise(r => setTimeout(r, 15));
+    ping.touch();
+  }
+  assert.equal(writes.length, 0, `持续 touch 期间不应发 ping,实际发了 ${writes.length} 个`);
+
+  // 停止 touch 后应恢复发 ping
+  await new Promise(r => setTimeout(r, 200));
+  ping.stop();
+  assert.ok(writes.length > 0, '停止 touch 后应发出 ping');
+});
+
+test('createIdlePing idleMs<=0 时完全关闭', async () => {
+  const writes: string[] = [];
+  const fakeRes = {
+    writableEnded: false,
+    writable: true,
+    write: (s: string) => { writes.push(s); return true; },
+    on: () => {},
+  } as unknown as http.ServerResponse;
+  const ping = createIdlePing(fakeRes, 0);
+  ping.touch();
+  await new Promise(r => setTimeout(r, 120));
+  ping.stop();
+  assert.equal(writes.length, 0);
 });
