@@ -66,6 +66,50 @@ function anthropicError(type: string, message: string): string {
   return JSON.stringify({ type: 'error', error: { type, message } });
 }
 
+/**
+ * 流式空闲心跳控制器:SSE 转发循环中每次收到上游字节后调用 touch(),
+ * 上游静默超过 idleMs 时向下游发标准 Anthropic ping 帧,
+ * 避免 Claude Code 客户端 180s 空闲看门狗("stream idle: no bytes")掐断连接。
+ * 流结束时必须调用 stop() 清理计时器。
+ */
+export function createIdlePing(res: http.ServerResponse, idleMs: number): { touch(): void; stop(): void } {
+  // 标准 Anthropic SSE ping 事件(与 api.anthropic.com 流式响应中的心跳帧一致)
+  const PING_EVENT = 'event: ping\ndata: {"type":"ping"}\n\n';
+  let timer: NodeJS.Timeout | null = null;
+  let stopped = false;
+  // 客户端提前断开时转发循环可能仍挂在 reader.read() 上,
+  // 监听 close 兜底停表,防止计时器泄漏拖住进程退出
+  res.on('close', () => {
+    stopped = true;
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+  });
+  const arm = (): void => {
+    if (stopped || timer) {
+      return;
+    }
+    timer = setTimeout(() => {
+      timer = null;
+      if (!res.writableEnded && res.writable && !stopped) {
+        res.write(PING_EVENT);
+        arm();
+      }
+    }, idleMs);
+  };
+  return {
+    touch: arm,
+    stop: (): void => {
+      stopped = true;
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+    },
+  };
+}
+
 /** codex 多账号访问接口:计数 / 游标 / 按下标取有效凭证 / 标记成功 */
 export interface CodexAccess {
   count(): Promise<number>;
@@ -81,9 +125,14 @@ export interface OpenAIAccess {
   add(p: Pool, tokens: number): void;
 }
 
+/** 流式空闲心跳默认间隔:远小于 Claude Code 客户端 180s 空闲看门狗 */
+const DEFAULT_IDLE_PING_MS = 15_000;
+
 export interface ProxyServerDeps {
   /** 读取当前配置(每次请求实时读,保证热更新) */
   getConfig: () => ProxyConfig;
+  /** 流式空闲心跳间隔(ms):超过该时长没有向下游写任何字节时,主动发标准 Anthropic ping 帧;<=0 关闭 */
+  idlePingMs?: number;
   /** codex 多账号凭证访问;未登录时 count() 返回 0 */
   codex?: CodexAccess;
   /** openai 官方免费额度访问;未注入则不做额度限制 */
@@ -97,6 +146,7 @@ export interface ProxyServerDeps {
  * - 非 anthropic 格式目标 → 返回 502 提示(Part 2 才支持)
  */
 export function createProxyServer(deps: ProxyServerDeps): http.Server {
+  const idlePingMs = deps.idlePingMs ?? DEFAULT_IDLE_PING_MS;
   return http.createServer((req, res) => {
     if (req.method !== 'POST') {
       res.writeHead(405, { 'Allow': 'POST' });
@@ -236,24 +286,31 @@ export function createProxyServer(deps: ProxyServerDeps): http.Server {
 
               codex.markSuccess(idx);
               res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
+              const idlePing = createIdlePing(res, idlePingMs);
+              idlePing.touch(); // 先武装:上游首字节前也可能长时间静默
               const parser = new SSEParser();
               const stream = translator!.createStreamTranslator();
               const reader = upstream.body?.getReader();
               const decoder = new TextDecoder();
-              if (reader) {
-                while (true) {
-                  const { done, value } = await reader.read();
-                  if (done) {
-                    break;
-                  }
-                  for (const payload of parser.push(decoder.decode(value, { stream: true }))) {
-                    for (const event of stream.push(payload)) {
-                      if (!res.write(event)) {
-                        await new Promise<void>(resolve => res.once('drain', resolve));
+              try {
+                if (reader) {
+                  while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) {
+                      break;
+                    }
+                    idlePing.touch();
+                    for (const payload of parser.push(decoder.decode(value, { stream: true }))) {
+                      for (const event of stream.push(payload)) {
+                        if (!res.write(event)) {
+                          await new Promise<void>(resolve => res.once('drain', resolve));
+                        }
                       }
                     }
                   }
                 }
+              } finally {
+                idlePing.stop();
               }
               res.end();
               return;
@@ -308,31 +365,38 @@ export function createProxyServer(deps: ProxyServerDeps): http.Server {
             if (translator) {
               // 格式转换:边收上游 SSE 边转 Anthropic SSE
               res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
+              const idlePing = createIdlePing(res, idlePingMs);
+              idlePing.touch(); // 先武装:上游首字节前也可能长时间静默
               const parser = new SSEParser();
               const stream = translator.createStreamTranslator();
               const reader = upstream.body?.getReader();
               const decoder = new TextDecoder();
-              if (reader) {
-                while (true) {
-                  const { done, value } = await reader.read();
-                  if (done) {
-                    break;
-                  }
-                  for (const payload of parser.push(decoder.decode(value, { stream: true }))) {
-                    // openai 官方:从流式响应中提取 usage 并回写当日用量
-                    if (openaiPool && deps.openai) {
-                      const u = extractResponsesUsage(payload);
-                      if (u != null) {
-                        deps.openai.add(openaiPool, u);
-                      }
+              try {
+                if (reader) {
+                  while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) {
+                      break;
                     }
-                    for (const event of stream.push(payload)) {
-                      if (!res.write(event)) {
-                        await new Promise<void>(resolve => res.once('drain', resolve));
+                    idlePing.touch();
+                    for (const payload of parser.push(decoder.decode(value, { stream: true }))) {
+                      // openai 官方:从流式响应中提取 usage 并回写当日用量
+                      if (openaiPool && deps.openai) {
+                        const u = extractResponsesUsage(payload);
+                        if (u != null) {
+                          deps.openai.add(openaiPool, u);
+                        }
+                      }
+                      for (const event of stream.push(payload)) {
+                        if (!res.write(event)) {
+                          await new Promise<void>(resolve => res.once('drain', resolve));
+                        }
                       }
                     }
                   }
                 }
+              } finally {
+                idlePing.stop();
               }
               res.end();
               return;
