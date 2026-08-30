@@ -68,6 +68,57 @@ test('freeTokensOnly 开 + 模型不在列表:停用', () => {
   assert.equal(p.allowed, false);
 });
 
+test('freeTokensOnly 开 + 余量充足(>= estimate):允许、免费', () => {
+  // 1M 池上限 1000k，已用 900k，余量 100k >= 50k
+  const p = planOpenAIRequest(
+    'gpt-5.5',
+    set({ freeTokens: true, freeTokensOnly: true }),
+    (pool) => (pool === '1M' ? 900_000 : 0),
+    (pool) => (pool === '1M' ? 50_000 : 0),
+  );
+  assert.deepEqual(p, { allowed: true, flex: false, pool: '1M' });
+});
+
+test('freeTokensOnly 开 + 余量不足上次用量(< estimate):提前停用防擦边', () => {
+  // 1M 池上限 1000k，已用 980k，余量 20k < 上次用量 30k
+  const p = planOpenAIRequest(
+    'gpt-5.5',
+    set({ freeTokens: true, freeTokensOnly: true }),
+    (pool) => (pool === '1M' ? 980_000 : 0),
+    (pool) => (pool === '1M' ? 30_000 : 0),
+  );
+  assert.deepEqual(p, { allowed: false, flex: false, pool: '1M' });
+});
+
+test('freeTokens 开 + freeTokensOnly 关 + 余量不足上次用量:转付费并带 flex', () => {
+  // 1M 池上限 1000k，已用 980k，余量 20k < 上次用量 30k，允许付费
+  const p = planOpenAIRequest(
+    'gpt-5.5',
+    set({ flex: true, freeTokens: true, freeTokensOnly: false }),
+    (pool) => (pool === '1M' ? 980_000 : 0),
+    (pool) => (pool === '1M' ? 30_000 : 0),
+  );
+  assert.deepEqual(p, { allowed: true, flex: true, pool: '1M' });
+});
+
+test('estimate 缺省时兼容旧行为(只要余量 > 0 即免费)', () => {
+  const p = planOpenAIRequest(
+    'gpt-5.5',
+    set({ freeTokens: true, freeTokensOnly: true }),
+    (pool) => (pool === '1M' ? 999_999 : 0),
+  );
+  assert.deepEqual(p, { allowed: true, flex: false, pool: '1M' });
+});
+
+test('两池隔离:1M 池余量不足停用不影响 10M 池正常使用', () => {
+  const used = (pool: '1M' | '10M') => (pool === '1M' ? 990_000 : 100_000);
+  const est = (pool: '1M' | '10M') => (pool === '1M' ? 20_000 : 5_000);
+  const p1M = planOpenAIRequest('gpt-5.5', set({ freeTokens: true, freeTokensOnly: true }), used, est);
+  const p10M = planOpenAIRequest('gpt-5-mini', set({ freeTokens: true, freeTokensOnly: true }), used, est);
+  assert.equal(p1M.allowed, false);
+  assert.equal(p10M.allowed, true);
+});
+
 const T0 = Date.UTC(2026, 5, 24, 10, 0, 0); // 2026-06-24
 const T1 = Date.UTC(2026, 5, 25, 1, 0, 0);  // 2026-06-25(跨天)
 

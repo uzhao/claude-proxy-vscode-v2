@@ -65,9 +65,12 @@ export function planOpenAIRequest(
   model: string,
   settings: OpenAIOfficialSettings,
   used: (p: Pool) => number,
+  estimate: (p: Pool) => number = () => 0,
 ): OpenAIPlan {
   const pool = resolvePool(model);
-  const isFree = settings.freeTokens && pool != null && used(pool) < POOL_LIMIT[pool];
+  const est = pool != null ? estimate(pool) : 0;
+  const remaining = pool != null ? POOL_LIMIT[pool] - used(pool) : 0;
+  const isFree = settings.freeTokens && pool != null && remaining > 0 && remaining >= est;
   const allowed = !settings.freeTokensOnly || isFree;
   const flex = settings.flex && !isFree;
   return { allowed, flex, pool };
