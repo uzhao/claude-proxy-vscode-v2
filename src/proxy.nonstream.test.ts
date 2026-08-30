@@ -306,3 +306,38 @@ test('目标 Provider 未配置 key 时直接回 401 authentication_error,不透
   }
 });
 
+test('openai 目标在剩余额度低于 estimate 时返回 429 额度耗尽且不发上游请求', async () => {
+  let fetchCalled = false;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    fetchCalled = true;
+    return new Response('{"ok":true}', { status: 200 });
+  }) as typeof fetch;
+
+  const server = createProxyServer({
+    getConfig: () => ({
+      mapping: 'openai:gpt-5.5',
+      providers: [{ name: 'openai', apiKeys: ['sk-mock'] }],
+    }),
+    openai: {
+      settings: () => ({ flex: false, freeTokens: true, freeTokensOnly: true }),
+      used: () => 990_000,
+      add: () => {},
+      estimate: () => 20_000, // 余量 10k < 估计 20k
+    },
+  });
+  await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+  try {
+    const port = (server.address() as AddressInfo).port;
+    const res = await post(port, { model: 'claude-x', messages: [] });
+    assert.equal(res.status, 429);
+    assert.equal(fetchCalled, false, '不应向任何上游发起 fetch 请求');
+    const body = JSON.parse(res.body);
+    assert.equal(body.error.type, 'rate_limit_error');
+    assert.match(body.error.message, /OpenAI daily free quota exhausted/);
+  } finally {
+    globalThis.fetch = realFetch;
+    await new Promise<void>(r => server.close(() => r()));
+  }
+});
+

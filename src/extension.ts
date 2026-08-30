@@ -148,16 +148,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
-  // openai 官方免费额度:settings/usage 均存 globalState;used/add 按当前 UTC 日期判断
+  // openai 官方免费额度:settings/usage 均存 globalState;used/add 按当前 UTC 日期判断;lastTokens 存会话内存(退出程序时自然清零)
+  const lastTokens: Record<'1M' | '10M', number> = { '1M': 0, '10M': 0 };
   const openaiAccess = {
     settings: (): OpenAIOfficialSettings =>
       context.globalState.get<OpenAIOfficialSettings>(OPENAI_SETTINGS_KEY, DEFAULT_OPENAI_SETTINGS),
     used: (p: '1M' | '10M'): number =>
       readUsage(context.globalState.get<OpenAIUsageState>(OPENAI_USAGE_KEY), p, Date.now()),
     add: (p: '1M' | '10M', tokens: number): void => {
+      lastTokens[p] = tokens;
       const next = addUsage(context.globalState.get<OpenAIUsageState>(OPENAI_USAGE_KEY), p, tokens, Date.now());
       void context.globalState.update(OPENAI_USAGE_KEY, next);
     },
+    estimate: (p: '1M' | '10M'): number => lastTokens[p] ?? 0,
   };
 
   // 启动代理 server:固定起始端口(claudeProxy.port,默认 4001),被占则递增找可用

@@ -182,11 +182,12 @@ export interface CodexAccess {
   markSuccess(i: number): void;
 }
 
-/** openai 官方免费额度访问:读设置 / 读当日用量 / 累加用量 */
+/** openai 官方免费额度访问:读设置 / 读当日用量 / 累加用量 / 读上次用量估计 */
 export interface OpenAIAccess {
   settings(): OpenAIOfficialSettings;
   used(p: Pool): number;
   add(p: Pool, tokens: number): void;
+  estimate(p: Pool): number;
 }
 
 /** 流式空闲心跳默认间隔:远小于 Claude Code 客户端 180s 空闲看门狗 */
@@ -448,7 +449,10 @@ export function createProxyServer(deps: ProxyServerDeps): http.Server {
             // openai 官方:免费额度决策(停用 / flex 注入 / 计量池)
             if (target.preset.id === 'openai' && deps.openai) {
               const plan: OpenAIPlan = planOpenAIRequest(
-                target.model, deps.openai.settings(), (p) => deps.openai!.used(p),
+                target.model,
+                deps.openai.settings(),
+                (p) => deps.openai!.used(p),
+                (p) => deps.openai!.estimate(p),
               );
               if (!plan.allowed) {
                 const msg = plan.pool
