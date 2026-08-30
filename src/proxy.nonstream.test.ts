@@ -279,3 +279,30 @@ test('透传路径(mapping=pass)也记日志', async () => {
     await new Promise<void>(r => server.close(() => r()));
   }
 });
+
+test('目标 Provider 未配置 key 时直接回 401 authentication_error,不透传', async () => {
+  let fetchCalled = false;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    fetchCalled = true;
+    return new Response('{"ok":true}', { status: 200 });
+  }) as typeof fetch;
+
+  const server = createProxyServer({
+    getConfig: () => ({ mapping: 'glm:glm-4.6', providers: [] }),
+  });
+  await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+  try {
+    const res = await post((server.address() as AddressInfo).port, { model: 'claude-x', messages: [] });
+    assert.equal(res.status, 401);
+    assert.equal(fetchCalled, false, '不应向任何上游发起 fetch 请求');
+    const body = JSON.parse(res.body);
+    assert.equal(body.type, 'error');
+    assert.equal(body.error.type, 'authentication_error');
+    assert.match(body.error.message, /未配置 API Key/);
+  } finally {
+    globalThis.fetch = realFetch;
+    await new Promise<void>(r => server.close(() => r()));
+  }
+});
+

@@ -18,9 +18,13 @@ test('anthropic 格式 + 有 key → 命中目标', () => {
   assert.equal(t.forwardable, true);
 });
 
-test('未配置 key 的 provider 返回 null', () => {
-  assert.equal(resolveTarget({ mapping: 'glm:glm-4.6', providers: [] }), null);
-  assert.equal(resolveTarget({ mapping: 'glm:glm-4.6', providers: [{ name: 'glm', apiKeys: [] }] }), null);
+test('未配置 key 的 provider 仍返回 target(带空 apiKeys)', () => {
+  const t1 = resolveTarget({ mapping: 'glm:glm-4.6', providers: [] })!;
+  assert.equal(t1.preset.id, 'glm');
+  assert.deepEqual(t1.apiKeys, []);
+  const t2 = resolveTarget({ mapping: 'glm:glm-4.6', providers: [{ name: 'glm', apiKeys: [] }] })!;
+  assert.equal(t2.preset.id, 'glm');
+  assert.deepEqual(t2.apiKeys, []);
 });
 
 test('未知 provider 或缺 model 返回 null', () => {

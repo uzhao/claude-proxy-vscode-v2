@@ -38,10 +38,6 @@ export function resolveTarget(cfg: ProxyConfig): Target | null {
   }
   const entry = getProvider(cfg, name);
   const apiKeys = entry?.apiKeys ?? [];
-  // codex 用 OAuth 登录、自定义 provider 可 keyless(由 baseUrl 直接转发);其余 provider 必须至少有一个 key
-  if (preset.id !== 'codex' && !preset.custom && apiKeys.length === 0) {
-    return null;
-  }
   return { preset, model, apiKeys, forwardable: preset.forwardable };
 }
 
@@ -401,6 +397,16 @@ export function createProxyServer(deps: ProxyServerDeps): http.Server {
 
         const cfg = deps.getConfig();
         const target = resolveTarget(cfg);
+
+        // 目标 Provider 未配置 API Key(且非 codex / 非 keyless 自定义 provider) → Anthropic 标准 401 错误
+        if (target && target.preset.id !== 'codex' && !target.preset.custom && target.apiKeys.length === 0) {
+          console.warn(`[proxy] provider "${target.preset.id}" has no api keys configured`);
+          res.writeHead(401, { 'content-type': 'application/json' });
+          res.end(anthropicError('authentication_error',
+            `Provider "${target.preset.id}" 未配置 API Key,请在 Provider 设置中添加。`));
+          finish({ reason: 'no_api_keys' });
+          return;
+        }
 
         // 解析转换器:有 target 且该格式支持转换则走转换转发;anthropic 格式无 translator,走原样转发
         const translator = target ? getTranslator(target.preset) : null;
