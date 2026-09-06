@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveTarget, shouldRotate, pickCodexSequence } from './proxy';
+import { applyAmdChatCompatibility, resolveTarget, shouldRotate, pickCodexSequence } from './proxy';
 import { ProxyConfig } from './config';
 
 const withGlm: ProxyConfig = { mapping: 'glm:glm-4.6', providers: [{ name: 'glm', apiKeys: ['k1', 'k2'] }] };
@@ -47,6 +47,31 @@ test('codex 无 providers.json key 仍命中 target(用 OAuth)', () => {
 test('model 名含冒号可正确还原', () => {
   const t = resolveTarget({ mapping: 'openrouter:vendor:model-x', providers: [{ name: 'openrouter', apiKeys: ['k'] }] })!;
   assert.equal(t.model, 'vendor:model-x');
+});
+
+test('AMD Chat Completions 从 Claude adaptive thinking 写入 reasoning_effort', () => {
+  const upstream: any = { model: 'DeepSeek-V4-Flash', messages: [], stream: true };
+  applyAmdChatCompatibility('https://developer.amd.com.cn/radeon/api', upstream, {
+    thinking: { type: 'adaptive' }, output_config: { effort: 'max' },
+  });
+  assert.equal(upstream.reasoning_effort, 'max');
+  assert.equal(upstream.reasoning, undefined);
+});
+
+test('AMD Chat Completions 将 Claude thinking 预算映射为 reasoning_effort', () => {
+  const upstream: any = { model: 'DeepSeek-V4-Flash', messages: [], stream: true };
+  applyAmdChatCompatibility('https://developer.amd.com.cn/radeon/api', upstream, {
+    thinking: { type: 'enabled', budget_tokens: 10000 },
+  });
+  assert.equal(upstream.reasoning_effort, 'medium');
+});
+
+test('非 AMD 地址不添加 reasoning_effort', () => {
+  const upstream: any = { model: 'gpt-5', messages: [], stream: true };
+  applyAmdChatCompatibility('https://api.openai.com', upstream, {
+    thinking: { type: 'adaptive' }, output_config: { effort: 'high' },
+  });
+  assert.deepEqual(upstream, { model: 'gpt-5', messages: [], stream: true });
 });
 
 test('shouldRotate 仅对 401/429/5xx 为真', () => {

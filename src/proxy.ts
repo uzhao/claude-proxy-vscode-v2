@@ -46,6 +46,50 @@ export function shouldRotate(status: number): boolean {
   return status === 401 || status === 429 || status >= 500;
 }
 
+/** AMD Chat Completions 以顶层 reasoning_effort 开启推理。 */
+export function applyAmdChatCompatibility(baseUrl: string, upstreamBody: any, claudeBody: any): void {
+  if (!/^https:\/\/developer\.amd\.com\.cn\/radeon\/api\/?$/i.test(baseUrl)) {
+    return;
+  }
+  const effort = thinkingToAmdEffort(claudeBody?.thinking, claudeBody?.output_config);
+  if (effort) {
+    upstreamBody.reasoning_effort = effort;
+  }
+}
+
+/** Claude thinking 配置 → AMD 支持的 Chat Completions reasoning_effort。 */
+function thinkingToAmdEffort(thinking: any, outputConfig: any): string | undefined {
+  if (!thinking || typeof thinking !== 'object') {
+    return undefined;
+  }
+  switch (thinking.type) {
+    case 'enabled':
+      return budgetToAmdEffort(typeof thinking.budget_tokens === 'number' ? thinking.budget_tokens : -1);
+    case 'adaptive':
+    case 'auto': {
+      const effort = outputConfig?.effort;
+      return typeof effort === 'string' && effort.trim() ? effort.trim().toLowerCase() : 'high';
+    }
+    case 'disabled':
+      return 'none';
+    default:
+      return undefined;
+  }
+}
+
+function budgetToAmdEffort(budget: number): string {
+  if (budget < 0) {
+    return 'medium';
+  }
+  if (budget <= 4096) {
+    return 'low';
+  }
+  if (budget <= 16384) {
+    return 'medium';
+  }
+  return 'high';
+}
+
 /** 从 startIndex(对 count 取模)起、长度 count 的轮转下标序列;count<=0 返回 [] */
 export function pickCodexSequence(count: number, startIndex: number): number[] {
   if (count <= 0) {
@@ -446,6 +490,9 @@ export function createProxyServer(deps: ProxyServerDeps): http.Server {
             // 格式转换路径(openai 系):换端点 + 请求体转换
             targetUrl = `${target.preset.baseUrl}${translator.endpointPath}`;
             const upstreamBody = translator.buildRequest(requestBody ?? {}, target.model);
+            if (target.preset.api === 'chat') {
+              applyAmdChatCompatibility(target.preset.baseUrl, upstreamBody, requestBody);
+            }
             // openai 官方:免费额度决策(停用 / flex 注入 / 计量池)
             if (target.preset.id === 'openai' && deps.openai) {
               const plan: OpenAIPlan = planOpenAIRequest(
